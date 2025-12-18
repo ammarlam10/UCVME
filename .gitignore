@@ -1,3 +1,27 @@
-DATA_DIR_Temp
-test_run
-train.sh
+
+
+# Data
+DATA_DIR/
+
+
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Logs
+logs/
+*.log
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
