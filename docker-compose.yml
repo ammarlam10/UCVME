@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  ucvme:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ucvme:latest
+    container_name: ucvme_training
+    
+    # GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    
+    # Environment variables
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/workspace
+    
+    # Volume mounts
+    volumes:
+      # Mount data directory (read-only for data)
+      - /work/ammar/sslrp/data:/data:ro
+      # Mount outputs directory (read-write)
+      - ./outputs:/workspace/outputs
+      # Mount configs (optional, for easy config editing)
+      - ./configs:/workspace/configs
+    
+    # Working directory
+    working_dir: /workspace
+    
+    # Keep container running
+    stdin_open: true
+    tty: true
+    
+    # Command (can be overridden)
+    command: /bin/bash
+

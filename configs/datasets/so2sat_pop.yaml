@@ -1,0 +1,39 @@
+name: "so2sat_pop"
+data_root: "So2Sat_POP"  # Relative to --data_root, or use absolute path
+data_type: "tiff_csv"
+
+# CSV structure
+csv_filename_pattern: "{city_id}_{pop}_{cityname}.csv"
+csv_target_column: "POP"
+csv_id_column: "GRD_ID"
+csv_class_column: "Class"
+csv_split_column: null  # Will be determined by directory (train/test)
+
+# Image structure
+image_path_template: "{city_dir}/sen2{season}/Class_{class}/{grd_id}_sen2{season}.tif"
+season: "spring"  # Options: spring, summer, autumn, winter
+parts: ["Part1", "Part2"]  # Both parts to aggregate
+
+# Image format
+channels: 10  # Sentinel-2 bands (will select first 3 for RGB or use all)
+use_rgb_only: true  # If true, use only first 3 channels for ResNet compatibility
+image_size: [100, 100]
+normalize: true
+compute_stats: true  # Auto-compute mean/std
+
+# Target normalization
+target_mean: null  # Auto-compute from data
+target_std: null   # Auto-compute from data
+
+# Augmentation
+pad_param: 5
+horizontal_flip: true
+
+# File list
+file_list: "FileList.csv"  # Will be generated if missing
+ssl_split_column: "SSL_SPLIT"
+
+# Data loading
+num_workers: 4
+batch_size: 32
+

@@ -1,27 +1,55 @@
-
-
-# Data
-DATA_DIR/
-
-
-
-# Python cache
+# Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
 
 # Virtual environments
-.venv/
 venv/
 env/
+ENV/
+.venv
 
-# Logs
-logs/
-*.log
-
-# IDE / OS files
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# Data directories
+DATA_DIR/
+outputs/
+*.pt
+*.pth
+*.h5
+*.csv
+!requirements.txt
+
+# Logs
+*.log
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
 .DS_Store
 Thumbs.db
 
+# Docker
+.dockerignore
+
+# Checkpoints
+checkpoint.pt
+best.pt
+log.csv
+z_*.csv
+train_pred_*.csv
+val_predmcd0_*.csv

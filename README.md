@@ -32,6 +32,24 @@ DATA_DIR
 
 ## Environment
 
+### Option 1: Docker (Recommended)
+
+The easiest way to run UCVME is using Docker. See [DOCKER_USAGE.md](DOCKER_USAGE.md) for detailed instructions.
+
+**Quick Start:**
+```bash
+# Build image
+docker-compose build
+
+# Run training
+docker-compose run --rm ucvme python3 ucvme.py \
+    --dataset so2sat_pop \
+    --data_root /data \
+    --output /workspace/outputs/experiment
+```
+
+### Option 2: Conda Environment
+
 It is recommended to use PyTorch `conda` environments for running the program. A requirements file has been included. 
 
 <br />
@@ -39,18 +57,32 @@ It is recommended to use PyTorch `conda` environments for running the program. A
 
 ## Training and testing
 
+### Multi-Dataset Support
 
-### To perform training, run:
+UCVME now supports multiple datasets. Use the new `ucvme.py` script:
+
+```bash
+# Train on So2Sat_POP dataset
+python3 ucvme.py \
+    --dataset so2sat_pop \
+    --data_root /work/ammar/sslrp/data \
+    --output ./outputs/experiment \
+    --rd_label 1000 \
+    --rd_unlabel 5000
+```
+
+### Legacy UTKFace Training
+
+For the original UTKFace age estimation:
 
 ```
 python3 ucvme_age.py --output=<OUTPUT_DIR> 
 ```
 
-
-### To perform testing only, run:
+### Testing only:
 
 ```
-python3 ucvme_age.py --output=<OUTPUT_DIR> --test_only
+python3 ucvme.py --dataset so2sat_pop --data_root /work/ammar/sslrp/data --output=<OUTPUT_DIR> --test_only
 ```
 
 
