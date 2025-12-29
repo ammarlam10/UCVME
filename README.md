@@ -34,6 +34,85 @@ DATA_DIR
 
 It is recommended to use PyTorch `conda` environments for running the program. A requirements file has been included. 
 
+### Docker Setup (Recommended)
+
+The easiest way to run this codebase is using Docker. The repository includes a Dockerfile and docker-compose configuration.
+
+#### Prerequisites
+- Docker (version 20.10 or later)
+- Docker Compose (version 1.29 or later)
+- NVIDIA Docker runtime (for GPU support, optional)
+
+#### Building the Docker Image
+
+```bash
+# Build using docker-compose
+docker-compose build
+
+# Or build directly with docker
+docker build -t ucvme:latest .
+```
+
+#### Running with Docker Compose
+
+```bash
+# Start the container
+docker-compose up -d
+
+# Access the container shell
+docker-compose exec ucvme bash
+
+# Run training inside the container
+python3 ucvme_age.py --output=/workspace/output
+
+# Run testing
+python3 ucvme_age.py --output=/workspace/output --test_only
+
+# Stop the container
+docker-compose down
+```
+
+#### Running with Docker directly
+
+```bash
+# Build the image
+docker build -t ucvme:latest .
+
+# Run the container (CPU only)
+docker run -it --rm \
+  -v $(pwd)/DATA_DIR:/workspace/DATA_DIR \
+  -v $(pwd)/output:/workspace/output \
+  ucvme:latest bash
+
+# Run with GPU support (requires nvidia-docker)
+docker run -it --rm \
+  --gpus all \
+  -v $(pwd)/DATA_DIR:/workspace/DATA_DIR \
+  -v $(pwd)/output:/workspace/output \
+  ucvme:latest bash
+```
+
+#### GPU Support
+
+To enable GPU support in docker-compose, uncomment the GPU-related lines in `docker-compose.yml`:
+
+```yaml
+deploy:
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: 1
+          capabilities: [gpu]
+```
+
+Or use the `runtime: nvidia` option for older docker-compose versions.
+
+#### Notes
+- The `DATA_DIR` and `output` directories are mounted as volumes, so your data and results persist outside the container
+- Make sure your data is organized in `DATA_DIR/UTKFace/` as described in the Data section
+- The container uses PyTorch 1.11.0 with CUDA 11.3 support
+
 <br />
 <br />
 

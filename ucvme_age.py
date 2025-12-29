@@ -3,6 +3,12 @@
 import sys
 import math
 import os
+
+# Add workspace directory to Python path for module imports
+workspace_dir = os.path.dirname(os.path.abspath(__file__))
+if workspace_dir not in sys.path:
+    sys.path.insert(0, workspace_dir)
+
 import time
 import shutil
 import datetime

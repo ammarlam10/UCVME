@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  ucvme:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ucvme:latest
+    container_name: ucvme
+    volumes:
+      # Mount data directory
+      - ./DATA_DIR:/workspace/DATA_DIR
+      # Mount output directory for results
+      - ./output:/workspace/output
+      # Optional: mount pretrained weights
+      - ./weights:/workspace/weights
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    # Uncomment the following lines if you have GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    # Or use runtime: nvidia for older docker-compose versions
+    # runtime: nvidia
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+

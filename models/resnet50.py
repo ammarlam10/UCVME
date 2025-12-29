@@ -1,7 +1,11 @@
 import torch
 from torch import Tensor
 import torch.nn as nn
-from torchvision.models.utils import load_state_dict_from_url
+# Fix for compatibility with different torchvision versions
+try:
+    from torchvision.models.utils import load_state_dict_from_url
+except ImportError:
+    from torch.hub import load_state_dict_from_url
 from typing import Type, Any, Callable, Union, List, Optional
 
 
