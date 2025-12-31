@@ -19,3 +19,9 @@ opencv-python>=4.5.0
 # Type hints
 typing-extensions>=4.0.0
 
+# Model libraries
+timm>=0.6.0
+
+# Config file support
+pyyaml>=5.4.0
+

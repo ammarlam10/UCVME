@@ -12,6 +12,8 @@ services:
       - ./DATA_DIR:/workspace/DATA_DIR
       # Mount output directory for results
       - ./output:/workspace/output
+      # Mount configs directory
+      - ./configs:/workspace/configs
       # Optional: mount pretrained weights
       - ./weights:/workspace/weights
     environment:

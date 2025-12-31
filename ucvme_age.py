@@ -13,8 +13,10 @@ import time
 import shutil
 import datetime
 import pandas as pd
+import itertools
 
 import click
+import yaml
 import matplotlib.pyplot as plt
 import numpy as np
 import sklearn.metrics
@@ -31,12 +33,14 @@ from torch.distributions.normal import Normal
 
 
 @click.command("ucvme")
-@click.option("--data_dir", type=click.Path(exists=True, file_okay=False), default="DATA_DIR")
+@click.option("--config", type=click.Path(exists=True, file_okay=True), default=None,
+              help="Path to config YAML file (optional, overrides defaults)")
+@click.option("--data_dir", type=click.Path(exists=True, file_okay=False), default=None)
 @click.option("--output", type=click.Path(file_okay=False), default=None)
-@click.option("--pretrained/--random", default=True)
+@click.option("--pretrained/--random", default=None)
 @click.option("--weights", type=click.Path(exists=True, dir_okay=False), default=None)
-@click.option("--run_test/--skip_test", default=True)
-@click.option("--test_only/--run_all", default=False)
+@click.option("--run_test/--skip_test", default=None)
+@click.option("--test_only/--run_all", default=None)
 
 @click.option("--num_epochs", type=int, default=30)   
 @click.option("--lr", type=float, default=0.0001)
@@ -62,48 +66,120 @@ from torch.distributions.normal import Normal
 @click.option("--samp_fq", type=int, default=5)
 @click.option("--samp_ssl", type=int, default=5)
 
-@click.option("--drp_p", type=float, default=0.05)
+@click.option("--drp_p", type=float, default=None)
+@click.option("--model", type=click.Choice(['resnet50', 'efficientnetb0'], case_sensitive=False), 
+              default=None, help='Model architecture: resnet50 or efficientnetb0')
+
+
+def load_config(config_path):
+    """Load configuration from YAML file."""
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
 
 
 def run(
-    data_dir="DATA_DIR",
+    config=None,
+    data_dir=None,
     output=None,
-    pretrained=True,
+    pretrained=None,
     weights=None,
-    run_test=True,
-    test_only = False,
+    run_test=None,
+    test_only=None,
 
-    num_epochs=30,
-    lr=0.0001,
-    weight_decay=1e-3,
-    lr_step_period=10,
-    num_workers=4,
-    batch_size=32,
+    num_epochs=None,
+    lr=None,
+    weight_decay=None,
+    lr_step_period=None,
+    num_workers=None,
+    batch_size=None,
     device=None,
-    seed=0,
+    seed=None,
 
-    reduced_set = True,
-    rd_label = 1000,
-    rd_unlabel = 9518,
+    reduced_set=None,
+    rd_label=None,
+    rd_unlabel=None,
 
-    ssl_mult = -1,
-    w_ulb = 10,
+    ssl_mult=None,
+    w_ulb=None,
 
-    pad_param = 5,
-    y_mean = 35,
-    y_std = 11,
-    samp_fq = 5,
-    samp_ssl = 5,
+    pad_param=None,
+    y_mean=None,
+    y_std=None,
+    samp_fq=None,
+    samp_ssl=None,
 
-    drp_p = 0.05
+    drp_p=None,
+    model=None
 ):
-    
+    # Load config file if provided
+    if config:
+        cfg = load_config(config)
+        print(f"Loaded config from: {config}")
+        
+        # Extract values from config, but allow CLI args to override
+        model_name = model or cfg['model']['name']
+        pretrained = pretrained if pretrained is not None else cfg['model']['pretrained']
+        drp_p = drp_p if drp_p is not None else cfg['model']['drp_p']
+        
+        data_dir = data_dir or cfg['data']['data_dir']
+        reduced_set = reduced_set if reduced_set is not None else cfg['data']['reduced_set']
+        rd_label = rd_label if rd_label is not None else cfg['data']['rd_label']
+        rd_unlabel = rd_unlabel if rd_unlabel is not None else cfg['data']['rd_unlabel']
+        pad_param = pad_param if pad_param is not None else cfg['data']['pad_param']
+        
+        num_epochs = num_epochs if num_epochs is not None else cfg['training']['num_epochs']
+        lr = lr if lr is not None else cfg['training']['lr']
+        weight_decay = weight_decay if weight_decay is not None else cfg['training']['weight_decay']
+        lr_step_period = lr_step_period if lr_step_period is not None else cfg['training']['lr_step_period']
+        batch_size = batch_size if batch_size is not None else cfg['training']['batch_size']
+        num_workers = num_workers if num_workers is not None else cfg['training']['num_workers']
+        seed = seed if seed is not None else cfg['training']['seed']
+        
+        ssl_mult = ssl_mult if ssl_mult is not None else cfg['ssl']['ssl_mult']
+        w_ulb = w_ulb if w_ulb is not None else cfg['ssl']['w_ulb']
+        samp_fq = samp_fq if samp_fq is not None else cfg['ssl']['samp_fq']
+        samp_ssl = samp_ssl if samp_ssl is not None else cfg['ssl']['samp_ssl']
+        
+        y_mean = y_mean if y_mean is not None else cfg['target']['y_mean']
+        y_std = y_std if y_std is not None else cfg['target']['y_std']
+        
+        device = device if device is not None else cfg['misc']['device']
+        run_test = run_test if run_test is not None else cfg['misc']['run_test']
+        test_only = test_only if test_only is not None else cfg['misc']['test_only']
+    else:
+        # Use defaults if config not provided
+        model_name = model or 'resnet50'
+        pretrained = pretrained if pretrained is not None else True
+        drp_p = drp_p if drp_p is not None else 0.05
+        data_dir = data_dir or "DATA_DIR"
+        reduced_set = reduced_set if reduced_set is not None else True
+        rd_label = rd_label if rd_label is not None else 1000
+        rd_unlabel = rd_unlabel if rd_unlabel is not None else 9518
+        pad_param = pad_param if pad_param is not None else 5
+        num_epochs = num_epochs if num_epochs is not None else 30
+        lr = lr if lr is not None else 0.0001
+        weight_decay = weight_decay if weight_decay is not None else 1e-3
+        lr_step_period = lr_step_period if lr_step_period is not None else 10
+        num_workers = num_workers if num_workers is not None else 4
+        batch_size = batch_size if batch_size is not None else 32
+        seed = seed if seed is not None else 0
+        ssl_mult = ssl_mult if ssl_mult is not None else -1
+        w_ulb = w_ulb if w_ulb is not None else 10
+        samp_fq = samp_fq if samp_fq is not None else 5
+        samp_ssl = samp_ssl if samp_ssl is not None else 5
+        y_mean = y_mean if y_mean is not None else 35
+        y_std = y_std if y_std is not None else 11
+        run_test = run_test if run_test is not None else True
+        test_only = test_only if test_only is not None else False
 
     command_args = sys.argv[:]
 
     print("Run with options:")
     for carg_itr in command_args:
         print(carg_itr)
+    
+    print(f"Using model: {model_name}")
 
     if reduced_set:
         if not os.path.isfile(os.path.join(data_dir, "FileList_ssl_{}_{}.csv".format(rd_label, rd_unlabel))):
@@ -154,10 +230,18 @@ def run(
         assert 1==2, "wrong parameter for device"
 
 
-    model = models.resnet50_unc(pretrained=pretrained, drp_p = drp_p)
+    # Model selection
+    if model_name.lower() == 'resnet50':
+        model_fn = models.resnet50_unc
+    elif model_name.lower() == 'efficientnetb0':
+        model_fn = models.efficientnetb0_unc
+    else:
+        raise ValueError(f"Unknown model: {model_name}. Choose 'resnet50' or 'efficientnetb0'")
+    
+    model = model_fn(pretrained=pretrained, drp_p=drp_p)
     model = torch.nn.DataParallel(model)
 
-    model_1 = models.resnet50_unc(pretrained=pretrained, drp_p = drp_p)
+    model_1 = model_fn(pretrained=pretrained, drp_p=drp_p)
     model_1 = torch.nn.DataParallel(model_1)
 
     model.to(device)
@@ -471,11 +555,14 @@ def run_epoch(model,
 
     total_itr_num = len(dataloader_lb)
 
+    # Create iterators - avoid recreating iterators from exhausted DataLoaders with workers
+    # as this causes deadlock. Since we iterate exactly total_itr_num times (len of labeled dataloader)
+    # and unlabeled has more samples, neither should exhaust.
     dataloader_lb_itr = iter(dataloader_lb)
     dataloader_unlb_0_itr = iter(dataloader_unlb_0)
 
     for train_iter in range(total_itr_num):
-        (X_ulb_0, outcome_ulb) = dataloader_unlb_0_itr.next()
+        (X_ulb_0, outcome_ulb) = next(dataloader_unlb_0_itr)
 
         X_ulb_0 = X_ulb_0.to(device)
 
@@ -552,7 +639,7 @@ def run_epoch(model,
 
         loss_reg_cps = (loss_reg_cps0 + loss_reg_cps1) + (var_loss_ulb_0 + var_loss_ulb_1)
 
-        (X, outcome ) = dataloader_lb_itr.next()
+        (X, outcome ) = next(dataloader_lb_itr)
 
 
         y.append(outcome.detach().cpu().numpy())
