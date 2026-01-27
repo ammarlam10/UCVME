@@ -15,7 +15,7 @@ data:
   dataset_name: "so2sat_pop"
   data_dir: "/workspace/data/So2Sat_POP"  # Docker path
   target_column: "POP"  # Population is the target
-  image_dir: "So2Sat_POP_Part2"  # Part2 contains the images
+  image_dir: "So2Sat_POP_Part1"  # Part1 contains Sentinel-2 RGB images (sen2summer)
   file_list_name: "FileList.csv"
   reduced_set: true
   # Use percentage-based split: 20% labeled, 80% unlabeled

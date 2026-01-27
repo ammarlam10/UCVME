@@ -24,27 +24,23 @@ def create_filelist(data_dir, output_path, part1_dir="So2Sat_POP_Part1", part2_d
     Args:
         data_dir: Root directory containing Part1 and Part2
         output_path: Path to save FileList.csv
-        part1_dir: Name of Part1 directory (contains labels)
-        part2_dir: Name of Part2 directory (contains images)
+        part1_dir: Name of Part1 directory (contains labels and Sentinel-2 images)
+        part2_dir: Name of Part2 directory (not used for Sentinel-2, kept for compatibility)
     """
     data_dir = Path(data_dir)
     part1_path = data_dir / part1_dir
-    part2_path = data_dir / part2_dir
     
     if not part1_path.exists():
         raise ValueError(f"Part1 directory not found: {part1_path}")
-    if not part2_path.exists():
-        raise ValueError(f"Part2 directory not found: {part2_path}")
     
     records = []
     
     # Process train and test splits
     for split in ['train', 'test']:
         split_path_part1 = part1_path / split
-        split_path_part2 = part2_path / split
         
-        if not split_path_part1.exists() or not split_path_part2.exists():
-            print(f"Warning: {split} directory not found in both parts, skipping...")
+        if not split_path_part1.exists():
+            print(f"Warning: {split} directory not found in Part1, skipping...")
             continue
         
         # Get all city directories
@@ -74,15 +70,15 @@ def create_filelist(data_dir, output_path, part1_dir="So2Sat_POP_Part1", part2_d
                 pop = row['POP']
                 class_val = row.get('Class', '')
                 
-                # Find corresponding image in Part2
-                # Images are in: Part2/split/city/dem/Class_X/GRD_ID_dem.tif
+                # Find corresponding Sentinel-2 image in Part1
+                # Images are in: Part1/split/city/sen2summer/Class_X/GRD_ID_sen2summer.tif
                 class_dir_name = f"Class_{class_val}" if class_val != '' else "Class_0"
-                image_path = part2_path / split / city_name / "dem" / class_dir_name / f"{grd_id}_dem.tif"
+                image_path = part1_path / split / city_name / "sen2summer" / class_dir_name / f"{grd_id}_sen2summer.tif"
                 
                 # Alternative: check if image exists with different naming
                 if not image_path.exists():
                     # Try without class directory
-                    image_path_alt = part2_path / split / city_name / "dem" / f"{grd_id}_dem.tif"
+                    image_path_alt = part1_path / split / city_name / "sen2summer" / f"{grd_id}_sen2summer.tif"
                     if image_path_alt.exists():
                         image_path = image_path_alt
                     else:

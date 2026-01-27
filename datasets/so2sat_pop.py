@@ -13,10 +13,12 @@ class So2SatDataset(torchvision.datasets.VisionDataset):
     
     Dataset structure:
     - Part1/train/city_name/city_name.csv (contains GRD_ID, Class, POP)
-    - Part2/train/city_name/dem/Class_X/GRD_ID_dem.tif (images)
+    - Part1/train/city_name/sen2summer/Class_X/GRD_ID_sen2summer.tif (Sentinel-2 multi-spectral images)
     
     This class expects a FileList.csv in the root directory with columns:
     FileName, SPLIT, POP (or target column name), SSL_SPLIT (optional)
+    
+    Sentinel-2 images have 13 spectral channels. RGB bands are extracted from channels [2, 1, 0].
     """
     
     def __init__(self, root=None,
@@ -28,7 +30,7 @@ class So2SatDataset(torchvision.datasets.VisionDataset):
                  ssl_type=0,
                  ssl_postfix="",
                  ssl_mult=1,
-                 image_dir="So2Sat_POP_Part2",  # Part2 contains images
+                 image_dir="So2Sat_POP_Part1",  # Part1 contains Sentinel-2 images
                  file_list_name="FileList.csv"
                  ):
         if root is None:
@@ -99,8 +101,8 @@ class So2SatDataset(torchvision.datasets.VisionDataset):
         self.fnames = data["FileName"].tolist()
         self.outcome = data.values.tolist()
         
-        # Verify files exist (check in Part2 directory structure)
-        # Note: FileName should be relative path from root, e.g., "So2Sat_POP_Part2/train/city/dem/Class_X/file_dem.tif"
+        # Verify files exist (check in Part1 directory structure)
+        # Note: FileName should be relative path from root, e.g., "So2Sat_POP_Part1/train/city/sen2summer/Class_X/file_sen2summer.tif"
         missing = []
         for fname in self.fnames:
             full_path = os.path.join(self.root, fname)
@@ -119,23 +121,60 @@ class So2SatDataset(torchvision.datasets.VisionDataset):
         # Get image path
         image_path = os.path.join(self.root, self.fnames[index])
         
-        # Load image - handle both .tif (satellite) and standard formats
+        # Load image - handle Sentinel-2 multi-spectral TIFF files
         if image_path.endswith('.tif') or image_path.endswith('.tiff'):
-            # Use cv2 for TIFF files (may need additional libraries for multi-channel)
-            photo = cv2.imread(image_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
+            # Check if this is a Sentinel-2 file (sen2summer, sen2autumn, etc.)
+            is_sentinel2 = 'sen2' in image_path.lower()
+            
+            if is_sentinel2:
+                # Use tifffile for multi-spectral Sentinel-2 data (13 channels)
+                try:
+                    import tifffile
+                    photo = tifffile.imread(image_path).astype(np.float32)
+                    # Sentinel-2 shape is (H, W, 13) - need to extract RGB
+                    # RGB bands are typically channels [2, 1, 0] for Red, Green, Blue
+                    if len(photo.shape) == 3 and photo.shape[2] == 13:
+                        # Extract RGB: channels 2 (Red), 1 (Green), 0 (Blue)
+                        photo = photo[:, :, [2, 1, 0]]  # Shape: (H, W, 3)
+                        # Transpose to (C, H, W)
+                        photo = photo.transpose((2, 0, 1)).copy()
+                    elif len(photo.shape) == 3:
+                        # If not exactly 13 channels, try to extract first 3
+                        photo = photo[:, :, :3].transpose((2, 0, 1)).copy()
+                    else:
+                        raise ValueError(f"Unexpected Sentinel-2 image shape: {photo.shape}")
+                except ImportError:
+                    # Fallback to cv2 if tifffile not available (may fail for 13-channel)
+                    print("Warning: tifffile not available, trying cv2 (may fail for multi-spectral)")
+                    photo = cv2.imread(image_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
+                    if photo is None:
+                        raise ValueError(f"Failed to load image: {image_path}")
+                    if len(photo.shape) == 3:
+                        photo = photo.transpose((2, 0, 1)).copy()
+                    elif len(photo.shape) == 2:
+                        photo = photo[np.newaxis, :, :].copy()
+            else:
+                # Standard TIFF files (DEM, etc.)
+                photo = cv2.imread(image_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
+                if photo is None:
+                    raise ValueError(f"Failed to load image: {image_path}")
+                if len(photo.shape) == 3:
+                    photo = photo.transpose((2, 0, 1)).copy()
+                elif len(photo.shape) == 2:
+                    photo = photo[np.newaxis, :, :].copy()
+            
             # Resize to 224x224 for model compatibility (EfficientNet/ResNet expect 224x224)
             if photo is not None and photo.size > 0:
-                photo = cv2.resize(photo, (224, 224), interpolation=cv2.INTER_LINEAR)
+                # Resize each channel separately
+                c, h, w = photo.shape
+                photo_resized = np.zeros((c, 224, 224), dtype=photo.dtype)
+                for i in range(c):
+                    photo_resized[i] = cv2.resize(photo[i], (224, 224), interpolation=cv2.INTER_LINEAR)
+                photo = photo_resized.copy()
             else:
-                raise ValueError(f"Failed to load image: {image_path}")
-            # If multi-channel, transpose to (C, H, W) and make contiguous
-            if len(photo.shape) == 3:
-                photo = photo.transpose((2, 0, 1)).copy()  # Make contiguous after transpose
-            elif len(photo.shape) == 2:
-                # Single channel, add channel dimension
-                photo = photo[np.newaxis, :, :].copy()  # Make contiguous
+                raise ValueError(f"Failed to process image: {image_path}")
         else:
-            # Standard image formats
+            # Standard image formats (JPEG, PNG, etc.)
             photo = cv2.imread(image_path).astype(np.float32)
             # Resize to 224x224 for model compatibility
             if photo is not None and photo.size > 0:

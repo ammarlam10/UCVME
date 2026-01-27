@@ -30,6 +30,7 @@ case "$CMD" in
         echo "Starting interactive shell..."
         docker run -it --rm \
             ${GPU_FLAGS} \
+            --shm-size=32g \
             -v "${DATA_DIR_HOST}:${DATA_DIR_CONTAINER}" \
             -v "${OUTPUT_DIR_HOST}:${OUTPUT_DIR_CONTAINER}" \
             -v "${CONFIGS_DIR_HOST}:${CONFIGS_DIR_CONTAINER}" \
@@ -47,6 +48,7 @@ case "$CMD" in
         echo "  Output: ${OUTPUT}"
         docker run -it --rm \
             ${GPU_FLAGS} \
+            --shm-size=32g \
             -v "${DATA_DIR_HOST}:${DATA_DIR_CONTAINER}" \
             -v "${OUTPUT_DIR_HOST}:${OUTPUT_DIR_CONTAINER}" \
             -v "${CONFIGS_DIR_HOST}:${CONFIGS_DIR_CONTAINER}" \
@@ -66,6 +68,7 @@ case "$CMD" in
         echo "  Weights: ${WEIGHTS}"
         docker run -it --rm \
             ${GPU_FLAGS} \
+            --shm-size=32g \
             -v "${DATA_DIR_HOST}:${DATA_DIR_CONTAINER}" \
             -v "${OUTPUT_DIR_HOST}:${OUTPUT_DIR_CONTAINER}" \
             -v "${CONFIGS_DIR_HOST}:${CONFIGS_DIR_CONTAINER}" \
