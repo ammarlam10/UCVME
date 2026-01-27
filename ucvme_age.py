@@ -32,6 +32,13 @@ import utils
 from torch.distributions.normal import Normal
 
 
+def load_config(config_path):
+    """Load configuration from YAML file."""
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
 @click.command("ucvme")
 @click.option("--config", type=click.Path(exists=True, file_okay=True), default=None,
               help="Path to config YAML file (optional, overrides defaults)")
@@ -42,42 +49,33 @@ from torch.distributions.normal import Normal
 @click.option("--run_test/--skip_test", default=None)
 @click.option("--test_only/--run_all", default=None)
 
-@click.option("--num_epochs", type=int, default=30)   
-@click.option("--lr", type=float, default=0.0001)
-@click.option("--weight_decay", type=float, default=1e-3)
-@click.option("--lr_step_period", type=int, default=10)
-@click.option("--num_workers", type=int, default=4)
-@click.option("--batch_size", type=int, default=32)
+@click.option("--num_epochs", type=int, default=None)   
+@click.option("--lr", type=float, default=None)
+@click.option("--weight_decay", type=float, default=None)
+@click.option("--lr_step_period", type=int, default=None)
+@click.option("--num_workers", type=int, default=None)
+@click.option("--batch_size", type=int, default=None)
 @click.option("--device", type=str, default=None)
-@click.option("--seed", type=int, default=0)
+@click.option("--seed", type=int, default=None)
 
-@click.option("--reduced_set/--full_set", default=True)
-@click.option("--rd_label", type=int, default=1000) 
-@click.option("--rd_unlabel", type=int, default=9518)
-@click.option("--ssl_mult", type=int, default=-1)
-@click.option("--w_ulb", type=float, default=10)
+@click.option("--reduced_set/--full_set", default=None)
+@click.option("--rd_label", type=int, default=None) 
+@click.option("--rd_unlabel", type=int, default=None)
+@click.option("--ssl_mult", type=int, default=None)
+@click.option("--w_ulb", type=float, default=None)
 
-@click.option("--pad_param", type=int, default=5)
+@click.option("--pad_param", type=int, default=None)
 
 
-@click.option("--y_mean", type=float, default=35)
-@click.option("--y_std", type=float, default=11)
+@click.option("--y_mean", type=float, default=None)
+@click.option("--y_std", type=float, default=None)
 
-@click.option("--samp_fq", type=int, default=5)
-@click.option("--samp_ssl", type=int, default=5)
+@click.option("--samp_fq", type=int, default=None)
+@click.option("--samp_ssl", type=int, default=None)
 
 @click.option("--drp_p", type=float, default=None)
 @click.option("--model", type=click.Choice(['resnet50', 'efficientnetb0'], case_sensitive=False), 
               default=None, help='Model architecture: resnet50 or efficientnetb0')
-
-
-def load_config(config_path):
-    """Load configuration from YAML file."""
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
-
-
 def run(
     config=None,
     data_dir=None,
@@ -119,31 +117,74 @@ def run(
         
         # Extract values from config, but allow CLI args to override
         model_name = model or cfg['model']['name']
-        pretrained = pretrained if pretrained is not None else cfg['model']['pretrained']
-        drp_p = drp_p if drp_p is not None else cfg['model']['drp_p']
+        pretrained = pretrained if pretrained is not None else bool(cfg['model']['pretrained'])
+        drp_p = drp_p if drp_p is not None else float(cfg['model']['drp_p'])
         
         data_dir = data_dir or cfg['data']['data_dir']
-        reduced_set = reduced_set if reduced_set is not None else cfg['data']['reduced_set']
-        rd_label = rd_label if rd_label is not None else cfg['data']['rd_label']
-        rd_unlabel = rd_unlabel if rd_unlabel is not None else cfg['data']['rd_unlabel']
-        pad_param = pad_param if pad_param is not None else cfg['data']['pad_param']
+        reduced_set = reduced_set if reduced_set is not None else bool(cfg['data']['reduced_set'])
+        pad_param = pad_param if pad_param is not None else int(cfg['data']['pad_param'])
         
-        num_epochs = num_epochs if num_epochs is not None else cfg['training']['num_epochs']
-        lr = lr if lr is not None else cfg['training']['lr']
-        weight_decay = weight_decay if weight_decay is not None else cfg['training']['weight_decay']
-        lr_step_period = lr_step_period if lr_step_period is not None else cfg['training']['lr_step_period']
-        batch_size = batch_size if batch_size is not None else cfg['training']['batch_size']
-        num_workers = num_workers if num_workers is not None else cfg['training']['num_workers']
-        seed = seed if seed is not None else cfg['training']['seed']
+        # Dataset selection
+        dataset_name = cfg['data'].get('dataset_name', 'utkface')
+        target_column = cfg['data'].get('target_column', 'age')
+        image_dir = cfg['data'].get('image_dir', None)  # For UTKFace: "UTKFace", for So2Sat: "So2Sat_POP_Part2"
+        file_list_name = cfg['data'].get('file_list_name', 'FileList.csv')
         
-        ssl_mult = ssl_mult if ssl_mult is not None else cfg['ssl']['ssl_mult']
-        w_ulb = w_ulb if w_ulb is not None else cfg['ssl']['w_ulb']
-        samp_fq = samp_fq if samp_fq is not None else cfg['ssl']['samp_fq']
-        samp_ssl = samp_ssl if samp_ssl is not None else cfg['ssl']['samp_ssl']
+        # Handle percentage-based or absolute number-based label/unlabel split
+        label_percentage = cfg['data'].get('label_percentage', None)
+        unlabel_percentage = cfg['data'].get('unlabel_percentage', None)
         
-        y_mean = y_mean if y_mean is not None else cfg['target']['y_mean']
-        y_std = y_std if y_std is not None else cfg['target']['y_std']
+        # Get absolute numbers if not provided via CLI
+        if rd_label is None:
+            rd_label = cfg['data'].get('rd_label', None)
+        if rd_unlabel is None:
+            rd_unlabel = cfg['data'].get('rd_unlabel', None)
         
+        # Calculate from percentages if provided (takes precedence over absolute numbers)
+        if label_percentage is not None or unlabel_percentage is not None:
+            # Need to load data to get total train samples
+            data = pd.read_csv(os.path.join(data_dir, "FileList.csv"))
+            data["SPLIT"].map(lambda x: x.upper())
+            total_train_samples = len(data[data['SPLIT'] == 'TRAIN'])
+            
+            if label_percentage is not None:
+                rd_label = int(total_train_samples * label_percentage)
+                print(f"Calculated labeled samples ({label_percentage*100:.1f}%): {rd_label}")
+            
+            if unlabel_percentage is not None:
+                rd_unlabel = int(total_train_samples * unlabel_percentage)
+                print(f"Calculated unlabeled samples ({unlabel_percentage*100:.1f}%): {rd_unlabel}")
+            
+            # If only one percentage is provided, calculate the other
+            if label_percentage is not None and unlabel_percentage is None:
+                rd_unlabel = total_train_samples - rd_label
+                print(f"Calculated unlabeled samples (remaining): {rd_unlabel}")
+            elif unlabel_percentage is not None and label_percentage is None:
+                rd_label = total_train_samples - rd_unlabel
+                print(f"Calculated labeled samples (remaining): {rd_label}")
+            
+            print(f"Total training samples: {total_train_samples}")
+            print(f"Using {rd_label} labeled + {rd_unlabel} unlabeled = {rd_label + rd_unlabel} total")
+        
+        num_epochs = num_epochs if num_epochs is not None else int(cfg['training']['num_epochs'])
+        lr = lr if lr is not None else float(cfg['training']['lr'])
+        weight_decay = weight_decay if weight_decay is not None else float(cfg['training']['weight_decay'])
+        lr_step_period = lr_step_period if lr_step_period is not None else int(cfg['training']['lr_step_period'])
+        batch_size = batch_size if batch_size is not None else int(cfg['training']['batch_size'])
+        num_workers = num_workers if num_workers is not None else int(cfg['training']['num_workers'])
+        seed = seed if seed is not None else int(cfg['training']['seed'])
+        
+        ssl_mult = ssl_mult if ssl_mult is not None else int(cfg['ssl']['ssl_mult'])
+        w_ulb = w_ulb if w_ulb is not None else float(cfg['ssl']['w_ulb'])
+        samp_fq = samp_fq if samp_fq is not None else int(cfg['ssl']['samp_fq'])
+        samp_ssl = samp_ssl if samp_ssl is not None else int(cfg['ssl']['samp_ssl'])
+        
+        y_mean = y_mean if y_mean is not None else float(cfg['target']['y_mean'])
+        y_std = y_std if y_std is not None else float(cfg['target']['y_std'])
+        
+        # Output can come from CLI or config (CLI takes precedence)
+        if output is None:
+            output = cfg['misc'].get('output', None)
         device = device if device is not None else cfg['misc']['device']
         run_test = run_test if run_test is not None else cfg['misc']['run_test']
         test_only = test_only if test_only is not None else cfg['misc']['test_only']
@@ -157,6 +198,10 @@ def run(
         rd_label = rd_label if rd_label is not None else 1000
         rd_unlabel = rd_unlabel if rd_unlabel is not None else 9518
         pad_param = pad_param if pad_param is not None else 5
+        dataset_name = 'utkface'  # Default
+        target_column = 'age'  # Default
+        image_dir = None
+        file_list_name = 'FileList.csv'
         num_epochs = num_epochs if num_epochs is not None else 30
         lr = lr if lr is not None else 0.0001
         weight_decay = weight_decay if weight_decay is not None else 1e-3
@@ -182,6 +227,12 @@ def run(
     print(f"Using model: {model_name}")
 
     if reduced_set:
+        # Ensure we have both values (fallback to defaults if not set)
+        if rd_label is None:
+            rd_label = 1000
+        if rd_unlabel is None:
+            rd_unlabel = 9518
+        
         if not os.path.isfile(os.path.join(data_dir, "FileList_ssl_{}_{}.csv".format(rd_label, rd_unlabel))):
             print("Generating new file list for ssl dataset")
             np.random.seed(0)
@@ -193,7 +244,9 @@ def run(
             np.random.shuffle(file_name_list)
 
             label_list = file_name_list[:rd_label]
-            unlabel_list = file_name_list[rd_label:]
+            # Take unlabeled samples after labeled ones, up to rd_unlabel
+            end_idx = min(rd_label + rd_unlabel, len(file_name_list))
+            unlabel_list = file_name_list[rd_label:end_idx]
 
             data['SSL_SPLIT'] = "UNLABELED"
             data.loc[data['FileName'].isin(label_list), 'SSL_SPLIT'] = "LABELED"
@@ -268,25 +321,52 @@ def run(
         lr_step_period = math.inf
     scheduler_1 = torch.optim.lr_scheduler.StepLR(optim_1, lr_step_period)
 
-    mean, std = utils.get_mean_and_std(datasets.UTKdta(root=data_dir, split="train"))
+    # Get dataset class from registry
+    dataset_class = datasets.get_dataset(dataset_name)
+    print(f"Using dataset: {dataset_name} ({dataset_class.__name__})")
+    
+    # Prepare dataset kwargs
+    dataset_kwargs_base = {
+        "target_type": [target_column],
+        "mean": 0.,  # Will be calculated
+        "std": 1.    # Will be calculated
+    }
+    
+    # Add dataset-specific parameters
+    if image_dir is not None:
+        dataset_kwargs_base["image_dir"] = image_dir
+    if file_list_name is not None:
+        dataset_kwargs_base["file_list_name"] = file_list_name
+    
+    # Calculate mean and std
+    mean, std = utils.get_mean_and_std(dataset_class(root=data_dir, split="train", **dataset_kwargs_base))
     print("mean std", mean, std)
-
-    kwargs = {"target_type": ['age'],
-              "mean": mean,
-              "std": std
-              }
+    
+    # Update kwargs with calculated mean/std
+    kwargs = {
+        "target_type": [target_column],
+        "mean": mean,
+        "std": std
+    }
+    if image_dir is not None:
+        kwargs["image_dir"] = image_dir
+    if file_list_name is not None:
+        kwargs["file_list_name"] = file_list_name
 
     # Set up datasets and dataloaders
     dataset = {}
     dataset_trainsub = {}
     if reduced_set:
-        dataset_trainsub['lb'] = datasets.UTKdta(root=data_dir, split="train", **kwargs, pad=pad_param, ssl_postfix="_ssl_{}_{}".format(rd_label, rd_unlabel), ssl_type = 1, ssl_mult = ssl_mult_choice)
-        dataset_trainsub['unlb_0'] = datasets.UTKdta(root=data_dir, split="train", **kwargs, pad=pad_param, ssl_postfix="_ssl_{}_{}".format(rd_label, rd_unlabel), ssl_type = 2)
+        dataset_trainsub['lb'] = dataset_class(root=data_dir, split="train", **kwargs, pad=pad_param, ssl_postfix="_ssl_{}_{}".format(rd_label, rd_unlabel), ssl_type = 1, ssl_mult = ssl_mult_choice)
+        dataset_trainsub['unlb_0'] = dataset_class(root=data_dir, split="train", **kwargs, pad=pad_param, ssl_postfix="_ssl_{}_{}".format(rd_label, rd_unlabel), ssl_type = 2)
     else:
         assert 1==2, "not possible"
 
     dataset['train'] = dataset_trainsub
-    dataset["val"] = datasets.UTKdta(root=data_dir, split="val", **kwargs, ssl_postfix="_ssl_{}_{}".format(rd_label, rd_unlabel))
+    # Validation should not use SSL postfix - it uses the original FileList.csv
+    kwargs_val = kwargs.copy()
+    kwargs_val.pop('ssl_postfix', None)  # Remove ssl_postfix for validation
+    dataset["val"] = dataset_class(root=data_dir, split="val", **kwargs_val)
 
     with open(os.path.join(output, "log.csv"), "a") as f:
 
@@ -489,10 +569,14 @@ def run(
 
             split_list = ["test", "val"]
             
+            # Test/val splits should not use SSL postfix - use original FileList.csv
+            kwargs_test = kwargs.copy()
+            kwargs_test.pop('ssl_postfix', None)  # Remove ssl_postfix for test/val
+            
             for split in split_list: 
 
                 dataloader = torch.utils.data.DataLoader(
-                    datasets.UTKdta(root=data_dir, split=split, **kwargs, ssl_postfix="_ssl_{}_{}".format(rd_label, rd_unlabel)),
+                    dataset_class(root=data_dir, split=split, **kwargs_test),
                     batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=(device.type == "cuda"), worker_init_fn=worker_init_fn)
                 total_loss, yhat, y, _, _, _, _, _ = run_epoch_val(model = model, model_1 = model_1, dataloader = dataloader, train = False, optim = None, device = device, block_size=None, y_mean = y_mean, y_std = y_std, samp_fq = samp_fq)
 
@@ -859,6 +943,10 @@ def run_epoch_val(model,
 
                 pbar.set_postfix_str("{:.2f} ({:.2f})".format(total / n, loss.item()))
                 pbar.update()
+
+    # Handle empty lists (e.g., if validation dataset is empty)
+    if len(yhat) == 0:
+        raise ValueError("Validation dataloader returned no batches. Check if validation split has data.")
 
     yhat = np.concatenate(yhat)
     var_hat = np.concatenate(var_hat)

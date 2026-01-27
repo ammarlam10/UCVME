@@ -1,18 +1,15 @@
-# ResNet50 Configuration
+# EfficientNetB0 Configuration with 10% labeled data (using percentages)
 model:
-  name: "resnet50"
+  name: "efficientnetb0"
   pretrained: true
   drp_p: 0.05
 
 data:
   data_dir: "DATA_DIR"
   reduced_set: true
-  # Option 1: Use absolute numbers
-  rd_label: 1000
-  rd_unlabel: 9518
-  # Option 2: Use percentages (takes precedence over absolute numbers)
-  # label_percentage: 0.10    # 10% labeled
-  # unlabel_percentage: 0.90  # 90% unlabeled
+  # Use percentages for labeled/unlabeled split
+  label_percentage: 0.10    # 10% labeled
+  unlabel_percentage: 0.90  # 90% unlabeled
   pad_param: 5
 
 training:
@@ -38,6 +35,5 @@ misc:
   device: null  # null = auto-detect, or "cuda" or "cpu"
   run_test: true
   test_only: false
-
 
 

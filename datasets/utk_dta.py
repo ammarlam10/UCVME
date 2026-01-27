@@ -5,6 +5,7 @@ import collections
 import pandas
 import datetime
 import cv2
+import re
 
 import numpy as np
 import skimage.draw
@@ -12,6 +13,20 @@ import torchvision
 
 class UTKdta(torchvision.datasets.VisionDataset):
     
+    @staticmethod
+    def extract_age_from_filename(filename):
+        """
+        Extract age from UTKFace filename.
+        Format: age_gender_race_date.jpg.chip.jpg
+        Returns the age as integer, or None if extraction fails.
+        """
+        basename = os.path.basename(filename)
+        # Extract first number before first underscore
+        match = re.match(r'^(\d+)_', basename)
+        if match:
+            return int(match.group(1))
+        else:
+            return None
 
     def __init__(self, root=None,
                  split="train", target_type="age",
@@ -19,7 +34,9 @@ class UTKdta(torchvision.datasets.VisionDataset):
                  pad=None,
                  ssl_type = 0,
                  ssl_postfix = "",
-                 ssl_mult = 1
+                 ssl_mult = 1,
+                 image_dir = "UTKFace",  # Configurable image directory
+                 file_list_name = "FileList.csv"  # Configurable file list name
                  ):
         if root is None:
             assert 1==2, "need root value"
@@ -37,13 +54,16 @@ class UTKdta(torchvision.datasets.VisionDataset):
         self.ssl_type = ssl_type
         self.ssl_postfix = ssl_postfix
         self.ssl_mult = ssl_mult
+        self.image_dir = image_dir
+        self.file_list_name = file_list_name
 
         self.fnames, self.outcome = [], []
 
         # Load photo-level labels
-        print("Using data file from ", os.path.join(self.root, "FileList{}.csv".format(self.ssl_postfix)))
+        file_list_path = os.path.join(self.root, "{}{}.csv".format(self.file_list_name.replace(".csv", ""), self.ssl_postfix))
+        print("Using data file from ", file_list_path)
 
-        with open(os.path.join(self.root, "FileList{}.csv".format(self.ssl_postfix))) as f:
+        with open(file_list_path) as f:
             data = pandas.read_csv(f)
         data["SPLIT"].map(lambda x: x.upper())
 
@@ -87,17 +107,22 @@ class UTKdta(torchvision.datasets.VisionDataset):
 
         self.outcome = data.values.tolist()
 
-        missing = set(self.fnames) - set(os.listdir(os.path.join(self.root, "UTKFace")))
+        missing = set(self.fnames) - set(os.listdir(os.path.join(self.root, self.image_dir)))
         if len(missing) != 0:
-            print("{} photos could not be found in {}:".format(len(missing), os.path.join(self.root, "UTKFace")))
+            print("{} photos could not be found in {}:".format(len(missing), os.path.join(self.root, self.image_dir)))
             for f in sorted(missing):
                 print("\t", f)
-            raise FileNotFoundError(os.path.join(self.root, "UTKFace", sorted(missing)[0]))
+            raise FileNotFoundError(os.path.join(self.root, self.image_dir, sorted(missing)[0]))
 
     def __getitem__(self, index):
 
-        photo_path = os.path.join(self.root, "UTKFace", self.fnames[index])
+        photo_path = os.path.join(self.root, self.image_dir, self.fnames[index])
         photo = cv2.imread(photo_path).astype(np.float32)
+        # Resize image to fixed size (224x224) for ResNet compatibility
+        if photo is not None and photo.size > 0:
+            photo = cv2.resize(photo, (224, 224), interpolation=cv2.INTER_LINEAR)
+        else:
+            raise ValueError(f"Failed to load image: {photo_path}")
         photo = photo.transpose((2, 0, 1))
 
 
@@ -124,6 +149,17 @@ class UTKdta(torchvision.datasets.VisionDataset):
             key = self.fnames[index]
             if t == "Filename":
                 target.append(self.fnames[index])
+            elif t == "age":
+                # For age, extract from filename instead of CSV (more reliable)
+                age_from_filename = self.extract_age_from_filename(self.fnames[index])
+                if age_from_filename is not None:
+                    target.append(np.float32(age_from_filename))
+                else:
+                    # Fallback to CSV if filename extraction fails
+                    if t in self.header:
+                        target.append(np.float32(self.outcome[index][self.header.index(t)]))
+                    else:
+                        raise ValueError(f"Could not extract age from filename {self.fnames[index]} and 'age' not in CSV header")
             else:
                 target.append(np.float32(self.outcome[index][self.header.index(t)]))
 

@@ -38,6 +38,8 @@ Configuration files are located in the `configs/` directory and use YAML format.
 - `configs/efficientnetb0.yaml` - Full EfficientNetB0 configuration
 - `configs/resnet50_small.yaml` - Quick test config for ResNet50
 - `configs/efficientnetb0_small.yaml` - Quick test config for EfficientNetB0
+- `configs/resnet50_10percent.yaml` - ResNet50 with 10% labeled (using percentages)
+- `configs/efficientnetb0_10percent.yaml` - EfficientNetB0 with 10% labeled (using percentages)
 
 ### Config File Structure
 
@@ -52,6 +54,9 @@ data:
   reduced_set: true
   rd_label: 1000
   rd_unlabel: 9518
+  # OR use percentages (takes precedence over absolute numbers):
+  # label_percentage: 0.10    # 10% labeled
+  # unlabel_percentage: 0.90  # 90% unlabeled
   pad_param: 5
 
 training:
@@ -136,6 +141,44 @@ python3 ucvme_age.py \
     --config=configs/efficientnetb0_small.yaml \
     --output=./output/effnetb0_quick_test
 ```
+
+### 5. Using Percentage-Based Labeled/Unlabeled Split
+
+You can specify the labeled/unlabeled split using percentages instead of absolute numbers:
+
+```yaml
+data:
+  data_dir: "DATA_DIR"
+  reduced_set: true
+  # Option 1: Use percentages (recommended for experimentation)
+  label_percentage: 0.10    # 10% labeled
+  unlabel_percentage: 0.90  # 90% unlabeled
+  # Option 2: Use absolute numbers (original method)
+  # rd_label: 1000
+  # rd_unlabel: 9518
+  pad_param: 5
+```
+
+**Examples:**
+
+```bash
+# Use 10% labeled, 90% unlabeled (from config)
+python3 ucvme_age.py \
+    --config=configs/resnet50_10percent.yaml \
+    --output=./output/resnet50_10pct
+
+# Use 5% labeled, 95% unlabeled (custom config)
+# Create config with: label_percentage: 0.05, unlabel_percentage: 0.95
+python3 ucvme_age.py \
+    --config=configs/my_5percent_config.yaml \
+    --output=./output/resnet50_5pct
+```
+
+**Notes:**
+- Percentages take precedence over absolute numbers (`rd_label`/`rd_unlabel`)
+- If only one percentage is provided, the other is calculated automatically
+- Percentages are calculated from total TRAIN samples in FileList.csv
+- The calculated values are printed during execution for verification
 
 ## Docker Usage
 

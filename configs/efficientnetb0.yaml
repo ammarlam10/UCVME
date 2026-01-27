@@ -7,8 +7,12 @@ model:
 data:
   data_dir: "DATA_DIR"
   reduced_set: true
+  # Option 1: Use absolute numbers
   rd_label: 1000
   rd_unlabel: 9518
+  # Option 2: Use percentages (takes precedence over absolute numbers)
+  # label_percentage: 0.10    # 10% labeled
+  # unlabel_percentage: 0.90  # 90% unlabeled
   pad_param: 5
 
 training:

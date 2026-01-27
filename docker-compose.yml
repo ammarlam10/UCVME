@@ -8,12 +8,16 @@ services:
     image: ucvme:latest
     container_name: ucvme
     volumes:
-      # Mount data directory
+      # Mount data directory (UTKFace)
       - ./DATA_DIR:/workspace/DATA_DIR
+      # Mount So2Sat_POP data directory (adjust path as needed)
+      - /work/ammar/sslrp/data/So2Sat_POP:/workspace/data/So2Sat_POP
       # Mount output directory for results
       - ./output:/workspace/output
       # Mount configs directory
       - ./configs:/workspace/configs
+      # Mount scripts directory
+      - ./scripts:/workspace/scripts
       # Optional: mount pretrained weights
       - ./weights:/workspace/weights
     environment:

@@ -1,0 +1,217 @@
+
+import os
+import pandas
+import cv2
+import numpy as np
+import torchvision
+from typing import Optional, List
+
+
+class So2SatDataset(torchvision.datasets.VisionDataset):
+    """
+    So2Sat_POP dataset loader.
+    
+    Dataset structure:
+    - Part1/train/city_name/city_name.csv (contains GRD_ID, Class, POP)
+    - Part2/train/city_name/dem/Class_X/GRD_ID_dem.tif (images)
+    
+    This class expects a FileList.csv in the root directory with columns:
+    FileName, SPLIT, POP (or target column name), SSL_SPLIT (optional)
+    """
+    
+    def __init__(self, root=None,
+                 split="train", 
+                 target_type="POP",
+                 mean=0., 
+                 std=1.,
+                 pad=None,
+                 ssl_type=0,
+                 ssl_postfix="",
+                 ssl_mult=1,
+                 image_dir="So2Sat_POP_Part2",  # Part2 contains images
+                 file_list_name="FileList.csv"
+                 ):
+        if root is None:
+            raise ValueError("root value is required")
+        
+        super().__init__(root)
+        
+        self.split = split.upper()
+        if not isinstance(target_type, list):
+            target_type = [target_type]
+        self.target_type = target_type
+        self.mean = mean
+        self.std = std
+        self.pad = pad
+        self.ssl_type = ssl_type
+        self.ssl_postfix = ssl_postfix
+        self.ssl_mult = ssl_mult
+        self.image_dir = image_dir
+        self.file_list_name = file_list_name
+        
+        self.fnames, self.outcome = [], []
+        
+        # Load file list
+        file_list_path = os.path.join(self.root, "{}{}.csv".format(self.file_list_name.replace(".csv", ""), self.ssl_postfix))
+        print("Using data file from ", file_list_path)
+        
+        if not os.path.exists(file_list_path):
+            raise FileNotFoundError(f"FileList not found: {file_list_path}. Please create FileList.csv first.")
+        
+        with open(file_list_path) as f:
+            data = pandas.read_csv(f)
+        
+        if "SPLIT" in data.columns:
+            data["SPLIT"] = data["SPLIT"].map(lambda x: str(x).upper())
+        
+        if len(self.ssl_postfix) > 0:
+            data_train_lab = data[(data["SPLIT"] == "TRAIN") & (data["SSL_SPLIT"] == "LABELED")].copy()
+        else:
+            data_train_lab = data[(data["SPLIT"] == "TRAIN")].copy() if "SPLIT" in data.columns else data
+        
+        if self.split != "ALL" and "SPLIT" in data.columns:
+            data = data[data["SPLIT"] == self.split]
+        
+        # Handle SSL splits
+        if self.ssl_type == 1:
+            assert self.split == "TRAIN", "subset selection only for train"
+            if "SSL_SPLIT" in data.columns:
+                data = data[data["SSL_SPLIT"] == "LABELED"]
+            print("Using SSL_SPLIT Labeled, total samples", len(data))
+            data_columns = data.columns
+            if self.ssl_mult < 0:
+                data = pandas.DataFrame(np.repeat(data.values, 2, axis=0))
+            else:
+                data = pandas.DataFrame(np.repeat(data.values, self.ssl_mult, axis=0))
+            data.columns = data_columns
+            print("data after duplicates:", len(data))
+        
+        elif self.ssl_type == 2:
+            assert self.split == "TRAIN", "subset selection only for train"
+            if "SSL_SPLIT" in data.columns:
+                data = data[data["SSL_SPLIT"] != "LABELED"]
+            print("Using SSL_SPLIT unlabeled, total samples", len(data))
+        
+        elif self.ssl_type == 0:
+            print("Using SSL_SPLIT ALL, total samples", len(data))
+        
+        self.header = data.columns.tolist()
+        self.fnames = data["FileName"].tolist()
+        self.outcome = data.values.tolist()
+        
+        # Verify files exist (check in Part2 directory structure)
+        # Note: FileName should be relative path from root, e.g., "So2Sat_POP_Part2/train/city/dem/Class_X/file_dem.tif"
+        missing = []
+        for fname in self.fnames:
+            full_path = os.path.join(self.root, fname)
+            if not os.path.exists(full_path):
+                missing.append(fname)
+        
+        if len(missing) > 0:
+            print("{} images could not be found:".format(len(missing)))
+            for f in sorted(missing)[:10]:  # Show first 10
+                print("\t", f)
+            if len(missing) > 10:
+                print(f"\t... and {len(missing) - 10} more")
+            raise FileNotFoundError(f"Missing files. First missing: {sorted(missing)[0]}")
+    
+    def __getitem__(self, index):
+        # Get image path
+        image_path = os.path.join(self.root, self.fnames[index])
+        
+        # Load image - handle both .tif (satellite) and standard formats
+        if image_path.endswith('.tif') or image_path.endswith('.tiff'):
+            # Use cv2 for TIFF files (may need additional libraries for multi-channel)
+            photo = cv2.imread(image_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
+            # Resize to 224x224 for model compatibility (EfficientNet/ResNet expect 224x224)
+            if photo is not None and photo.size > 0:
+                photo = cv2.resize(photo, (224, 224), interpolation=cv2.INTER_LINEAR)
+            else:
+                raise ValueError(f"Failed to load image: {image_path}")
+            # If multi-channel, transpose to (C, H, W) and make contiguous
+            if len(photo.shape) == 3:
+                photo = photo.transpose((2, 0, 1)).copy()  # Make contiguous after transpose
+            elif len(photo.shape) == 2:
+                # Single channel, add channel dimension
+                photo = photo[np.newaxis, :, :].copy()  # Make contiguous
+        else:
+            # Standard image formats
+            photo = cv2.imread(image_path).astype(np.float32)
+            # Resize to 224x224 for model compatibility
+            if photo is not None and photo.size > 0:
+                photo = cv2.resize(photo, (224, 224), interpolation=cv2.INTER_LINEAR)
+            else:
+                raise ValueError(f"Failed to load image: {image_path}")
+            photo = photo.transpose((2, 0, 1)).copy()  # Make contiguous after transpose
+        
+        # Ensure 3 channels for RGB models (if single channel, repeat)
+        if photo.shape[0] == 1:
+            photo = np.repeat(photo, 3, axis=0).copy()  # Make contiguous after repeat
+        elif photo.shape[0] > 3:
+            # Multi-spectral: take first 3 channels (make contiguous copy)
+            photo = photo[:3, :, :].copy()
+        
+        # Apply normalization (ensure contiguous after operations)
+        if isinstance(self.mean, (float, int)):
+            photo = (photo - self.mean).copy()  # Make contiguous
+        else:
+            mean_reshaped = self.mean.reshape(-1, 1, 1)[:photo.shape[0], :, :]
+            if not mean_reshaped.flags['C_CONTIGUOUS']:
+                mean_reshaped = np.ascontiguousarray(mean_reshaped)
+            photo = (photo - mean_reshaped).copy()  # Make contiguous
+        
+        if isinstance(self.std, (float, int)):
+            photo = (photo / self.std).copy()  # Make contiguous
+        else:
+            std_reshaped = self.std.reshape(-1, 1, 1)[:photo.shape[0], :, :]
+            if not std_reshaped.flags['C_CONTIGUOUS']:
+                std_reshaped = np.ascontiguousarray(std_reshaped)
+            photo = (photo / std_reshaped).copy()  # Make contiguous
+        
+        # Data augmentation: random horizontal flip
+        if np.random.randint(0, 2) == 0:
+            photo = photo[:, :, ::-1].copy()  # Make contiguous copy to avoid storage issues
+        
+        # Gather targets
+        target = []
+        for t in self.target_type:
+            if t == "Filename":
+                target.append(self.fnames[index])
+            else:
+                target.append(np.float32(self.outcome[index][self.header.index(t)]))
+        
+        if target != []:
+            target = tuple(target) if len(target) > 1 else target[0]
+        
+        # Apply padding augmentation if specified
+        if self.pad is not None:
+            photo1 = photo.copy()
+            c, h, w = photo.shape
+            
+            temp1 = np.zeros((c, h + 2 * self.pad, w + 2 * self.pad), dtype=photo.dtype)
+            temp1[:, self.pad:-self.pad, self.pad:-self.pad] = photo1
+            
+            i1, j1 = np.random.randint(0, 2 * self.pad, 2)
+            photo1 = temp1[:, i1:(i1 + h), j1:(j1 + w)].copy()  # Make contiguous copy
+        else:
+            photo1 = photo.copy()
+        
+        # Create a completely fresh array with no memory sharing
+        # Use np.empty and explicit copy to ensure absolute independence
+        photo1_final = np.empty_like(photo1, dtype=np.float32, order='C')
+        np.copyto(photo1_final, photo1)
+        
+        # Final verification: ensure it's truly contiguous and independent
+        assert photo1_final.flags['C_CONTIGUOUS'], "Array must be C-contiguous"
+        assert photo1_final.flags['OWNDATA'], "Array must own its data"
+        
+        return photo1_final, target
+    
+    def __len__(self):
+        return len(self.fnames)
+    
+    def extra_repr(self) -> str:
+        """Additional information to add at end of __repr__."""
+        lines = ["Target type: {target_type}", "SPLIT: {split}"]
+        return '\n'.join(lines).format(**self.__dict__)
+

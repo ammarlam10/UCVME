@@ -1,0 +1,53 @@
+# So2Sat_POP EfficientNet-B0 Configuration with 20% Supervised Training - OPTIMIZED
+# Dataset: So2Sat_POP Population Estimation
+# - 119,794 training images, 18,292 test images
+# - 20% labeled, 80% unlabeled split for SSL
+# Model: EfficientNet-B0 from timm library
+# 
+# OPTIMIZATION CHANGES:
+# - Increased batch_size from 128 to 256 (with 4 GPUs, this gives 64 per GPU)
+# - Re-enabled num_workers (try 4 workers with larger shared memory)
+# - Use 4 GPUs instead of 2 for better parallelization
+
+model:
+  name: "efficientnetb0"
+  pretrained: true
+  drp_p: 0.05  # 5% dropout probability
+
+data:
+  dataset_name: "so2sat_pop"
+  data_dir: "/workspace/data/So2Sat_POP"  # Docker path
+  target_column: "POP"  # Population is the target
+  image_dir: "So2Sat_POP_Part2"  # Part2 contains the images
+  file_list_name: "FileList.csv"
+  reduced_set: true
+  # Use percentage-based split: 20% labeled, 80% unlabeled
+  # This will automatically calculate from total training samples in FileList.csv
+  label_percentage: 0.20    # 20% labeled (approximately 23,959 samples from 119,794 total)
+  unlabel_percentage: 0.80  # 80% unlabeled (approximately 95,835 samples from 119,794 total)
+  pad_param: 5
+
+training:
+  num_epochs: 30
+  lr: 0.0001
+  weight_decay: 1e-3
+  lr_step_period: 10
+  batch_size: 256  # Increased from 128 to 256 (64 per GPU with 4 GPUs)
+  num_workers: 4   # Re-enabled with 4 workers (try this with increased shared memory)
+  seed: 0
+
+ssl:
+  ssl_mult: -1             # Duplicate labeled samples (multiplier = -1 means 2x duplication)
+  w_ulb: 10                # Weight for unlabeled loss
+  samp_fq: 5               # Sampling frequency for variational inference
+  samp_ssl: 5              # Sampling frequency for SSL
+
+target:
+  # Population normalization - calculated from training data
+  y_mean: 1074.56  # Mean population per grid cell (from training data)
+  y_std: 2715.15   # Standard deviation (from training data)
+
+misc:
+  device: null  # null = auto-detect, or "cuda" or "cpu"
+  run_test: true
+  test_only: false

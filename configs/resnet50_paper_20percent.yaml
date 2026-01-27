@@ -1,0 +1,50 @@
+# ResNet50 Configuration matching paper settings with 20% labeled data
+# Paper: "Semi-Supervised Deep Regression with Uncertainty Consistency and 
+# Variational Model Ensembling via Bayesian Neural Networks"
+#
+# Dataset: UTKFace with train-test split following (Cao, Mirjalili, and Raschka 2019)
+# - 13,144 training images, 3,287 test images
+# - Age range: 21-60
+# - For SSL: 20% labeled, 80% unlabeled split
+
+model:
+  name: "resnet50"
+  pretrained: true
+  drp_p: 0.05  # 5% dropout probability (paper: "dropout probability as 5%")
+
+data:
+  data_dir: "DATA_DIR"
+  reduced_set: true
+  # Use percentage-based split: 20% labeled, 80% unlabeled
+  # This will automatically calculate from total training samples in FileList.csv
+  label_percentage: 0.20    # 20% labeled (approximately 2,629 samples from 13,144 total)
+  unlabel_percentage: 0.80  # 80% unlabeled (approximately 10,515 samples from 13,144 total)
+  pad_param: 5
+
+training:
+  num_epochs: 30           # Paper: "trained for 30 epochs"
+  lr: 0.0001               # Paper: "learning rate 10^-4"
+  weight_decay: 1e-3       # Paper: "weight decay 10^-3"
+  lr_step_period: 10       # Learning rate scheduler step period
+  batch_size: 32           # Paper: "batch size of 32 for both labeled and unlabeled data"
+  num_workers: 4
+  seed: 0
+
+ssl:
+  ssl_mult: -1             # Duplicate labeled samples (multiplier = -1 means 2x duplication)
+  w_ulb: 10                # Paper: "w_ulb = 10 which we choose empirically"
+  samp_fq: 5               # Paper: "T = 5 for variational inference" (samp_fq for frequency)
+  samp_ssl: 5              # Paper: "T = 5 for variational inference" (samp_ssl for SSL)
+
+target:
+  y_mean: 35               # Mean age (should be calculated from your training data)
+  y_std: 11                # Standard deviation of age (should be calculated from your training data)
+
+misc:
+  device: null  # null = auto-detect, or "cuda" or "cpu"
+  run_test: true           # Paper uses MAE and R2 for evaluation on test set
+  test_only: false
+
+# Note: The optimizer is Adam (hardcoded in ucvme_age.py, matching the paper)
+# Note: Dropout is applied after each of the four main residual blocks (layer1, layer2, layer3, layer4)
+# Note: The train-test split should be defined in FileList.csv with SPLIT column ('TRAIN' or 'TEST')
