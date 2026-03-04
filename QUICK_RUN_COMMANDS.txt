@@ -1,0 +1,77 @@
+================================================================================
+QUICK REFERENCE: SSL EXPERIMENTS DOCKER COMMANDS
+================================================================================
+
+All experiments use FIXED configurations with:
+- Corrected normalization (y_mean=1872.5640, y_std=3398.8516)
+- Fixed band extraction (RGB)
+- No double normalization
+- Batch size 64, num_workers 2
+- Validation R2, MAE, RMSE logging
+
+================================================================================
+EXPERIMENT 1: 5% SSL (3,047 labeled samples)
+================================================================================
+
+docker run --rm \
+    --gpus device=5 \
+    --shm-size=32g \
+    -v /work/ammar/sslrp/data/So2Sat_POP:/workspace/data/So2Sat_POP \
+    -v /work/ammar/sslrp/UCVME:/workspace \
+    -v /work/ammar/sslrp/UCVME/output:/workspace/output \
+    ucvme:latest \
+    python3 /workspace/ucvme_age.py \
+        --config=/workspace/configs/so2sat_pop_efficientnetb0_5percent_fixed.yaml \
+        --output=/workspace/output/so2sat_pop_efficientnetb0_5percent_fixed
+
+================================================================================
+EXPERIMENT 2: 10% SSL (6,095 labeled samples)
+================================================================================
+
+docker run --rm \
+    --gpus device=5 \
+    --shm-size=32g \
+    -v /work/ammar/sslrp/data/So2Sat_POP:/workspace/data/So2Sat_POP \
+    -v /work/ammar/sslrp/UCVME:/workspace \
+    -v /work/ammar/sslrp/UCVME/output:/workspace/output \
+    ucvme:latest \
+    python3 /workspace/ucvme_age.py \
+        --config=/workspace/configs/so2sat_pop_efficientnetb0_10percent_fixed.yaml \
+        --output=/workspace/output/so2sat_pop_efficientnetb0_10percent_fixed
+
+================================================================================
+EXPERIMENT 3: 20% SSL (12,190 labeled samples)
+================================================================================
+
+docker run --rm \
+    --gpus device=5 \
+    --shm-size=32g \
+    -v /work/ammar/sslrp/data/So2Sat_POP:/workspace/data/So2Sat_POP \
+    -v /work/ammar/sslrp/UCVME:/workspace \
+    -v /work/ammar/sslrp/UCVME/output:/workspace/output \
+    ucvme:latest \
+    python3 /workspace/ucvme_age.py \
+        --config=/workspace/configs/so2sat_pop_efficientnetb0_20percent_fixed.yaml \
+        --output=/workspace/output/so2sat_pop_efficientnetb0_20percent_fixed
+
+================================================================================
+MONITORING COMMANDS
+================================================================================
+
+# List tmux sessions
+tmux ls
+
+# Attach to session
+tmux attach -t ssl5percent
+tmux attach -t ssl10percent
+tmux attach -t ssl20percent
+
+# Monitor logs
+tail -f output/so2sat_pop_efficientnetb0_5percent_fixed/log.csv
+tail -f output/so2sat_pop_efficientnetb0_10percent_fixed/log.csv
+tail -f output/so2sat_pop_efficientnetb0_20percent_fixed/log.csv
+
+# Check GPU
+nvidia-smi
+
+================================================================================

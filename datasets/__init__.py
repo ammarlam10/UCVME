@@ -1,10 +1,14 @@
 from .utk_dta import UTKdta
 from .so2sat_pop import So2SatDataset
+from .so2sat_pop_custom import So2SatDatasetCustom
+from .bayern_forest_height import BayernForestHeightDataset
 
 # Dataset registry for easy selection
 DATASET_REGISTRY = {
     'utkface': UTKdta,
     'so2sat_pop': So2SatDataset,
+    'so2sat_pop_custom': So2SatDatasetCustom,
+    'bayern_forest_height': BayernForestHeightDataset,
 }
 
 def get_dataset(dataset_name):

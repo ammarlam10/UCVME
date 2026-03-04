@@ -25,3 +25,5 @@ timm>=0.6.0
 # Config file support
 pyyaml>=5.4.0
 
+# HDF5 file support
+h5py>=3.0.0

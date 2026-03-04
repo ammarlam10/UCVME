@@ -1,18 +1,17 @@
-# So2Sat_POP EfficientNet-B0 Configuration with 20% Supervised Training - OPTIMIZED
+# So2Sat_POP EfficientNet-B0 Configuration with 5% Supervised Training - FIXED VERSION
 # Dataset: So2Sat_POP Population Estimation
 # - Uses custom FileList.csv with POP <= 100 filtering (keeps 20% of low-pop samples)
-# - 20% labeled, 80% unlabeled split for SSL (applied on filtered dataset)
+# - 5% labeled, 95% unlabeled split for SSL (applied on filtered dataset)
 # Model: EfficientNet-B0 from timm library
 # 
-# DATA PROCESSING:
-# 1. First, create FileList.csv with POP <= 100 filtering using:
-#    python scripts/create_so2sat_pop_custom.py --data_dir /workspace/data/So2Sat_POP --output /workspace/data/So2Sat_POP/FileList.csv
-# 2. Then this config applies 20%/80% SSL split on the filtered dataset
-# 
-# OPTIMIZATION CHANGES:
-# - Increased batch_size from 128 to 256 (with 4 GPUs, this gives 64 per GPU)
-# - Re-enabled num_workers (try 4 workers with larger shared memory)
-# - Use 4 GPUs instead of 2 for better parallelization
+# FIXES APPLIED:
+# 1. Removed double normalization - only normalize in training loop
+# 2. Corrected y_mean and y_std calculated from filtered training data
+# 3. Fixed band extraction to use correct RGB order (indices 3,2,1)
+# 4. Removed mean/std normalization, keeping only clipping and min-max
+# 5. Reduced batch_size to 64 to avoid CUDA OOM
+# 6. GPU configuration fix (remove CUDA_VISIBLE_DEVICES from docker command)
+# 7. Added validation R2, MAE, and RMSE logging
 
 model:
   name: "efficientnetb0"
@@ -26,10 +25,10 @@ data:
   image_dir: "So2Sat_POP_Part1"  # Part1 contains Sentinel-2 RGB images (sen2spring)
   file_list_name: "FileList.csv"  # Should be created by create_so2sat_pop_custom.py
   reduced_set: true
-  # Use percentage-based split: 20% labeled, 80% unlabeled
+  # Use percentage-based split: 5% labeled, 95% unlabeled
   # This will automatically calculate from total training samples in filtered FileList.csv
-  label_percentage: 0.20    # 20% labeled (from filtered training samples)
-  unlabel_percentage: 0.80  # 80% unlabeled (from filtered training samples)
+  label_percentage: 0.05    # 5% labeled (from filtered training samples = 3,047 samples)
+  unlabel_percentage: 0.95  # 95% unlabeled (from filtered training samples = 57,905 samples)
   pad_param: 5
 
 training:
@@ -37,8 +36,8 @@ training:
   lr: 0.0001
   weight_decay: 1e-3
   lr_step_period: 10
-  batch_size: 256  # Increased from 128 to 256 (64 per GPU with 4 GPUs)
-  num_workers: 4   # Re-enabled with 4 workers (try this with increased shared memory)
+  batch_size: 64  # Reduced to 64 to avoid CUDA OOM
+  num_workers: 2  # Reduced to 2 to free up GPU memory
   seed: 0
 
 ssl:
@@ -48,9 +47,9 @@ ssl:
   samp_ssl: 5              # Sampling frequency for SSL
 
 target:
-  # Population normalization - values for custom dataset
-  y_mean: 1085.0   # Mean population per grid cell (for custom dataset)
-  y_std: 2800.0    # Standard deviation (for custom dataset)
+  # Population normalization - CORRECTED values calculated from filtered training data
+  y_mean: 1872.5640   # Mean population per grid cell (calculated from FileList.csv TRAIN split)
+  y_std: 3398.8516    # Standard deviation (calculated from FileList.csv TRAIN split)
 
 misc:
   device: null  # null = auto-detect, or "cuda" or "cpu"

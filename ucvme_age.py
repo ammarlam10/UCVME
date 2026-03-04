@@ -28,6 +28,7 @@ import subprocess
 import models
 import datasets
 import utils
+import utils_pixelwise
 
 from torch.distributions.normal import Normal
 
@@ -74,8 +75,8 @@ def load_config(config_path):
 @click.option("--samp_ssl", type=int, default=None)
 
 @click.option("--drp_p", type=float, default=None)
-@click.option("--model", type=click.Choice(['resnet50', 'efficientnetb0'], case_sensitive=False), 
-              default=None, help='Model architecture: resnet50 or efficientnetb0')
+@click.option("--model", type=click.Choice(['resnet50', 'efficientnetb0', 'unet'], case_sensitive=False), 
+              default=None, help='Model architecture: resnet50, efficientnetb0, or unet')
 def run(
     config=None,
     data_dir=None,
@@ -288,8 +289,10 @@ def run(
         model_fn = models.resnet50_unc
     elif model_name.lower() == 'efficientnetb0':
         model_fn = models.efficientnetb0_unc
+    elif model_name.lower() == 'unet':
+        model_fn = models.unet_unc
     else:
-        raise ValueError(f"Unknown model: {model_name}. Choose 'resnet50' or 'efficientnetb0'")
+        raise ValueError(f"Unknown model: {model_name}. Choose 'resnet50', 'efficientnetb0', or 'unet'")
     
     model = model_fn(pretrained=pretrained, drp_p=drp_p)
     model = torch.nn.DataParallel(model)
@@ -338,6 +341,11 @@ def run(
     if file_list_name is not None:
         dataset_kwargs_base["file_list_name"] = file_list_name
     
+    # Add normalize_mean and normalize_std for custom datasets (e.g., so2sat_pop_custom)
+    if dataset_name == 'so2sat_pop_custom':
+        dataset_kwargs_base["normalize_mean"] = y_mean
+        dataset_kwargs_base["normalize_std"] = y_std
+    
     # Calculate mean and std
     mean, std = utils.get_mean_and_std(dataset_class(root=data_dir, split="train", **dataset_kwargs_base))
     print("mean std", mean, std)
@@ -352,17 +360,27 @@ def run(
         kwargs["image_dir"] = image_dir
     if file_list_name is not None:
         kwargs["file_list_name"] = file_list_name
+    
+    # Add normalize_mean and normalize_std for custom datasets (e.g., so2sat_pop_custom)
+    if dataset_name == 'so2sat_pop_custom':
+        kwargs["normalize_mean"] = y_mean
+        kwargs["normalize_std"] = y_std
 
     # Set up datasets and dataloaders
     dataset = {}
     dataset_trainsub = {}
     if reduced_set:
+        # SSL mode: split into labeled and unlabeled
         dataset_trainsub['lb'] = dataset_class(root=data_dir, split="train", **kwargs, pad=pad_param, ssl_postfix="_ssl_{}_{}".format(rd_label, rd_unlabel), ssl_type = 1, ssl_mult = ssl_mult_choice)
         dataset_trainsub['unlb_0'] = dataset_class(root=data_dir, split="train", **kwargs, pad=pad_param, ssl_postfix="_ssl_{}_{}".format(rd_label, rd_unlabel), ssl_type = 2)
+        dataset['train'] = dataset_trainsub
     else:
-        assert 1==2, "not possible"
-
-    dataset['train'] = dataset_trainsub
+        # Non-SSL mode: use full training dataset
+        # For compatibility with training loop, create both datasets (they'll be the same)
+        # The SSL loss will still be computed but acts as consistency regularization between the two models
+        dataset_trainsub['lb'] = dataset_class(root=data_dir, split="train", **kwargs, pad=pad_param)
+        dataset_trainsub['unlb_0'] = dataset_class(root=data_dir, split="train", **kwargs, pad=pad_param)
+        dataset['train'] = dataset_trainsub
     # Validation should not use SSL postfix - it uses the original FileList.csv
     kwargs_val = kwargs.copy()
     kwargs_val.pop('ssl_postfix', None)  # Remove ssl_postfix for validation
@@ -482,7 +500,11 @@ def run(
                     loss_valit, yhat, y, var_hat, var_e, var_a, mean_0_ls, var_0_ls = run_epoch_val(model = model, model_1 = model_1, dataloader = dataloader, train = False, optim = None, device = device, block_size=None, y_mean = y_mean, y_std = y_std, samp_fq = samp_fq)
 
                     r2_value = sklearn.metrics.r2_score(y, yhat)
+                    mae_value = sklearn.metrics.mean_absolute_error(y, yhat)
+                    rmse_value = sklearn.metrics.mean_squared_error(y, yhat) ** 0.5
                     loss = loss_valit
+                    
+                    print(f"Epoch {epoch} - {phase}: R2={r2_value:.4f}, MAE={mae_value:.2f}, RMSE={rmse_value:.2f}", flush=True)
 
                     with open(os.path.join(output, "z_{}_epch{}_prd.csv".format(phase, epoch)), "a") as pred_out:
                         pred_out.write("yhat,y,var_hat, var_e, var_a\n")
@@ -509,10 +531,12 @@ def run(
                             f_trnpred.write("\n".format(clmn))
 
 
-                    f.write("{},{},{},{},{},{},{},{},{},{},{}".format(epoch,
+                    f.write("{},{},{},{},{},{},{},{},{},{},{},{},{}".format(epoch,
                                                                 phase,
                                                                 loss,
                                                                 r2_value,
+                                                                mae_value,
+                                                                rmse_value,
                                                                 time.time() - start_time,
                                                                 y.size,
                                                                 sum(torch.cuda.max_memory_allocated() for i in range(torch.cuda.device_count())),
@@ -556,12 +580,12 @@ def run(
                 bestLoss = best_model_loss
 
 
-        # Load best weights
-        if num_epochs != 0:
-            checkpoint = torch.load(os.path.join(output, "best.pt"))
+        # Load best weights for evaluation (after training or for test_only)
+        best_pt_path = os.path.join(output, "best.pt")
+        if num_epochs != 0 or (test_only and os.path.isfile(best_pt_path)):
+            checkpoint = torch.load(best_pt_path)
             model.load_state_dict(checkpoint['state_dict'], strict = False)
             model_1.load_state_dict(checkpoint['state_dict_1'], strict = False)
-
             f.write("Best validation loss {} from epoch {}, R2 {}\n".format(checkpoint["best_model_loss"], checkpoint["epoch"], checkpoint["r2"]))
             f.flush()
 
@@ -580,9 +604,11 @@ def run(
                     batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=(device.type == "cuda"), worker_init_fn=worker_init_fn)
                 total_loss, yhat, y, _, _, _, _, _ = run_epoch_val(model = model, model_1 = model_1, dataloader = dataloader, train = False, optim = None, device = device, block_size=None, y_mean = y_mean, y_std = y_std, samp_fq = samp_fq)
 
-                f.write("{} - {} (one clip) R2:   {:.3f}\n".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"), split, sklearn.metrics.r2_score(y, yhat)))
-                f.write("{} - {} (one clip) MAE:  {:.2f}\n".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"), split, sklearn.metrics.mean_absolute_error(y, yhat)))
-                f.write("{} - {} (one clip) RMSE: {:.2f}\n".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"), split, sklearn.metrics.mean_squared_error(y, yhat)**0.5))
+                # Dataset returns normalized y; yhat is denormalized. Convert y to original scale for metrics.
+                y_orig = y * y_std + y_mean
+                f.write("{} - {} (one clip) R2:   {:.3f}\n".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"), split, sklearn.metrics.r2_score(y_orig, yhat)))
+                f.write("{} - {} (one clip) MAE:  {:.2f}\n".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"), split, sklearn.metrics.mean_absolute_error(y_orig, yhat)))
+                f.write("{} - {} (one clip) RMSE: {:.2f}\n".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"), split, sklearn.metrics.mean_squared_error(y_orig, yhat)**0.5))
                 f.flush()
 
 
@@ -737,33 +763,72 @@ def run_epoch(model,
         
 
         mean_raw, var_raw = all_output
-        mean = mean_raw.view(-1)
-        var = var_raw.view(-1)
-
         mean_1_raw, var_1_raw = all_output_1
-        mean_1 = mean_1_raw.view(-1)
-        var_1 = var_1_raw.view(-1)
-
-
-
-        loss_mse = (mean - (outcome - y_mean) / y_std) ** 2
-        loss1 = torch.mul(torch.exp(-(var + var_1) / 2), loss_mse)
-        loss2 = (var + var_1) / 2
-        loss = .5 * (loss1 + loss2)
-
-        loss_reg_0 = loss.mean()
-        yhat_0.append(all_output[0].view(-1).to("cpu").detach().numpy() * y_std + y_mean)
-
         
+        # Check if output is pixel-wise or image-level
+        is_pixelwise = utils_pixelwise.is_pixelwise_output(mean_raw)
         
-
-        loss_mse_1 = (mean_1 - (outcome - y_mean) / y_std) ** 2
-        loss1_1 = torch.mul(torch.exp(-(var + var_1) / 2), loss_mse_1)
-        loss2_1 = (var + var_1) / 2
-        loss_1 = .5 * (loss1_1 + loss2_1)
-
-        loss_reg_1 = loss_1.mean()
-        yhat_1.append(all_output_1[0].view(-1).to("cpu").detach().numpy() * y_std + y_mean)
+        if is_pixelwise:
+            # Pixel-wise regression (e.g., UNET)
+            # Ensure outcome has same shape as prediction
+            if outcome.dim() == 1:
+                # Reshape outcome to match spatial dimensions (shouldn't happen with proper dataset)
+                raise ValueError("Outcome should be spatial for pixel-wise regression")
+            
+            # Normalize target
+            outcome_norm = (outcome - y_mean) / y_std
+            
+            # Squeeze channel dimension if present
+            if mean_raw.dim() == 4 and mean_raw.size(1) == 1:
+                mean = mean_raw.squeeze(1)
+                var = var_raw.squeeze(1)
+            else:
+                mean = mean_raw
+                var = var_raw
+            
+            if mean_1_raw.dim() == 4 and mean_1_raw.size(1) == 1:
+                mean_1 = mean_1_raw.squeeze(1)
+                var_1 = var_1_raw.squeeze(1)
+            else:
+                mean_1 = mean_1_raw
+                var_1 = var_1_raw
+            
+            # Compute pixel-wise loss
+            loss_mse = (mean - outcome_norm) ** 2
+            loss1 = torch.mul(torch.exp(-(var + var_1) / 2), loss_mse)
+            loss2 = (var + var_1) / 2
+            loss = .5 * (loss1 + loss2)
+            loss_reg_0 = loss.mean()
+            
+            loss_mse_1 = (mean_1 - outcome_norm) ** 2
+            loss1_1 = torch.mul(torch.exp(-(var + var_1) / 2), loss_mse_1)
+            loss2_1 = (var + var_1) / 2
+            loss_1 = .5 * (loss1_1 + loss2_1)
+            loss_reg_1 = loss_1.mean()
+            
+            # Store predictions (denormalized, flattened for metrics)
+            yhat_0.append((mean.detach().cpu().numpy() * y_std + y_mean).flatten())
+            yhat_1.append((mean_1.detach().cpu().numpy() * y_std + y_mean).flatten())
+        else:
+            # Image-level regression (e.g., ResNet, EfficientNet)
+            mean = mean_raw.view(-1)
+            var = var_raw.view(-1)
+            mean_1 = mean_1_raw.view(-1)
+            var_1 = var_1_raw.view(-1)
+            
+            loss_mse = (mean - (outcome - y_mean) / y_std) ** 2
+            loss1 = torch.mul(torch.exp(-(var + var_1) / 2), loss_mse)
+            loss2 = (var + var_1) / 2
+            loss = .5 * (loss1 + loss2)
+            loss_reg_0 = loss.mean()
+            yhat_0.append(all_output[0].view(-1).to("cpu").detach().numpy() * y_std + y_mean)
+            
+            loss_mse_1 = (mean_1 - (outcome - y_mean) / y_std) ** 2
+            loss1_1 = torch.mul(torch.exp(-(var + var_1) / 2), loss_mse_1)
+            loss2_1 = (var + var_1) / 2
+            loss_1 = .5 * (loss1_1 + loss2_1)
+            loss_reg_1 = loss_1.mean()
+            yhat_1.append(all_output_1[0].view(-1).to("cpu").detach().numpy() * y_std + y_mean)
 
 
         loss_reg = (loss_reg_0 + loss_reg_1)
@@ -801,9 +866,15 @@ def run_epoch(model,
 
     yhat_0 = np.concatenate(yhat_0)
     yhat_1 = np.concatenate(yhat_1)
-        
-
-    y = np.concatenate(y)
+    
+    # Handle y concatenation (flatten if pixel-wise)
+    y_list = []
+    for y_item in y:
+        if y_item.ndim > 1:
+            y_list.append(y_item.flatten())
+        else:
+            y_list.append(y_item)
+    y = np.concatenate(y_list)
 
     mean2s_0_stack_ls = np.concatenate(mean2s_0_stack_ls)
     mean2s_1_stack_ls = np.concatenate(mean2s_1_stack_ls)
@@ -868,23 +939,42 @@ def run_epoch_val(model,
                 mean2s_m1 = []
                 var1s_m1 = []
 
+                # Check if output is pixel-wise
+                test_output = model(X)
+                is_pixelwise = utils_pixelwise.is_pixelwise_output(test_output[0])
+                
                 for samp_itr in range(samp_fq):
                     all_ouput = model(X)
                     mean1_raw, var1_raw = all_ouput
-
-                    mean1 = mean1_raw.view(-1)
-                    var1 = var1_raw.view(-1)
+                    
+                    all_ouput_m1 = model_1(X)
+                    mean1_raw_m1, var1_raw_m1 = all_ouput_m1
+                    
+                    if is_pixelwise:
+                        # Pixel-wise: keep spatial dimensions, flatten for storage
+                        if mean1_raw.dim() == 4 and mean1_raw.size(1) == 1:
+                            mean1 = mean1_raw.squeeze(1).flatten(1)  # (B, H*W)
+                            var1 = var1_raw.squeeze(1).flatten(1)
+                        else:
+                            mean1 = mean1_raw.flatten(1)
+                            var1 = var1_raw.flatten(1)
+                        
+                        if mean1_raw_m1.dim() == 4 and mean1_raw_m1.size(1) == 1:
+                            mean1_m1 = mean1_raw_m1.squeeze(1).flatten(1)
+                            var1_m1 = var1_raw_m1.squeeze(1).flatten(1)
+                        else:
+                            mean1_m1 = mean1_raw_m1.flatten(1)
+                            var1_m1 = var1_raw_m1.flatten(1)
+                    else:
+                        # Image-level: flatten to 1D
+                        mean1 = mean1_raw.view(-1)
+                        var1 = var1_raw.view(-1)
+                        mean1_m1 = mean1_raw_m1.view(-1)
+                        var1_m1 = var1_raw_m1.view(-1)
 
                     mean1s.append(mean1** 2)
                     mean2s.append(mean1)
                     var1s.append(torch.exp(var1))
-
-
-                    all_ouput_m1 = model_1(X)
-                    mean1_raw_m1, var1_raw_m1 = all_ouput_m1
-
-                    mean1_m1 = mean1_raw_m1.view(-1)
-                    var1_m1 = var1_raw_m1.view(-1)
 
                     mean1s_m1.append(mean1_m1** 2)
                     mean2s_m1.append(mean1_m1)
@@ -926,12 +1016,29 @@ def run_epoch_val(model,
 
 
 
-                yhat.append(((mean2s_ + mean2s_m1_) / 2).to("cpu").detach().numpy() * y_std + y_mean)
+                # Denormalize predictions and store
+                pred_mean = ((mean2s_ + mean2s_m1_) / 2).to("cpu").detach().numpy() * y_std + y_mean
+                
+                if is_pixelwise:
+                    # Flatten pixel-wise predictions for metrics
+                    yhat.append(pred_mean.flatten())
+                else:
+                    yhat.append(pred_mean)
+                
                 var_hat.append(((var_norm + var_m1_norm) / 2).to("cpu").detach().numpy())
                 var_e.append(((var2 + var2_m1) / 2).to("cpu").detach().numpy())
                 var_a.append(((var1s_ + var1s_m1_) / 2).to("cpu").detach().numpy())
 
-                loss = torch.nn.functional.mse_loss( (mean2s_ + mean2s_m1_) / 2 , (outcome - y_mean) / y_std )
+                # Compute loss
+                if is_pixelwise:
+                    # Normalize outcome for pixel-wise
+                    if outcome.dim() == 3:
+                        outcome_norm = (outcome - y_mean) / y_std
+                    else:
+                        outcome_norm = (outcome - y_mean) / y_std
+                    loss = torch.nn.functional.mse_loss((mean2s_ + mean2s_m1_) / 2, outcome_norm)
+                else:
+                    loss = torch.nn.functional.mse_loss((mean2s_ + mean2s_m1_) / 2, (outcome - y_mean) / y_std)
 
                 if train:
                     optim.zero_grad()
@@ -952,7 +1059,15 @@ def run_epoch_val(model,
     var_hat = np.concatenate(var_hat)
     var_e = np.concatenate(var_e)
     var_a = np.concatenate(var_a)
-    y = np.concatenate(y)
+    
+    # Handle y concatenation (flatten if pixel-wise)
+    y_list = []
+    for y_item in y:
+        if y_item.ndim > 1:
+            y_list.append(y_item.flatten())
+        else:
+            y_list.append(y_item)
+    y = np.concatenate(y_list)
 
     mean2s_0_stack_ls_avg = np.concatenate(mean2s_0_stack_ls_avg)
     var1s_0_stack_ls_avg = np.concatenate(var1s_0_stack_ls_avg)

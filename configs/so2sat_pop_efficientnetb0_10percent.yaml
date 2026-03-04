@@ -4,7 +4,7 @@
 # - 10% labeled, 90% unlabeled split for SSL
 # Model: EfficientNet-B0 from timm library
 # 
-# OPTIMIZATION: batch_size=64 (for P100 16GB GPUs), num_workers=4, extended to 60 epochs for better convergence
+# OPTIMIZATION: batch_size=128 (for 32GB GPUs), num_workers=4, extended to 60 epochs for better convergence
 
 model:
   name: "efficientnetb0"
@@ -29,7 +29,7 @@ training:
   lr: 0.0001
   weight_decay: 0.001
   lr_step_period: 10
-  batch_size: 64  # Reduced to 64 for P100 16GB GPUs (32 per GPU)
+  batch_size: 128  # Increased to 128 for better gradient estimates (64 per GPU with 2 GPUs)
   num_workers: 4   # Re-enabled with 4 workers (use with --shm-size=32g in docker)
   seed: 0
 

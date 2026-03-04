@@ -1,0 +1,47 @@
+# Configuration for Bayern Forest Height pixel-wise regression with UNET
+# Dataset: Bayern Forest Height (RGB -> Height maps)
+# Model: UNET with uncertainty estimation
+# Task: Pixel-wise regression
+
+model:
+  name: unet
+  pretrained: false
+  drp_p: 0.2
+
+data:
+  dataset_name: bayern_forest_height
+  data_dir: /workspace/data/Bayern_forest_height_reduced
+  target_column: height
+  reduced_set: false  # Not using SSL for now
+  pad_param: 5  # Padding for data augmentation
+  
+  # No SSL split for initial testing
+  rd_label: null
+  rd_unlabel: null
+
+training:
+  num_epochs: 50
+  lr: 0.0001
+  weight_decay: 0.001
+  lr_step_period: 15
+  batch_size: 8  # Smaller batch size for pixel-wise regression (memory intensive)
+  num_workers: 0  # Set to 0 to avoid shared memory issues with large in-memory dataset
+  seed: 0
+
+ssl:
+  ssl_mult: -1  # Disable SSL for initial testing
+  w_ulb: 10.0
+  samp_fq: 5
+  samp_ssl: 5
+
+target:
+  # Target normalization (height in meters)
+  # These will be calculated from training data
+  y_mean: 15.0  # Approximate mean height
+  y_std: 10.0   # Approximate std height
+
+misc:
+  output: output/bayern_forest_height_unet
+  device: gpu
+  run_test: true
+  test_only: false
