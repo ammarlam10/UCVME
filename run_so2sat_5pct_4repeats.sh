@@ -4,11 +4,16 @@
 # Config and hyperparameters are unchanged; each run writes to a separate output dir.
 # Uses GPU 5 only.
 #
-# Previous run duration (from log):
+# Previous run duration (30 epochs, from log):
 #   Start: 2026-02-17 08:47:49 (Run timestamp: 20260217_084749)
 #   End:   2026-02-17 09:52:13 (test/val one-clip logging)
-#   Duration: ~1 hour 4 minutes per run
-#   → 4 runs ≈ 4h 16m total (sequential)
+#   Duration: ~1 hour 4 minutes per run (30 epochs)
+#
+# Current run (100 epochs with preloading):
+#   Preload time: ~15-25 min (one-time per run)
+#   Epoch time: ~60-70 s/epoch (estimated, may be faster with preload)
+#   Total per run: ~2.5-3 hours
+#   → 4 runs ≈ 10-12 hours total (sequential)
 #
 
 set -e
@@ -24,9 +29,9 @@ OUTPUT_HOST="${OUTPUT_HOST:-/work/ammar/sslrp/UCVME/output}"
 echo "=============================================="
 echo "So2Sat POP 5% fixed – 4 repeats (GPU 5)"
 echo "=============================================="
-echo "Config: $CONFIG"
+echo "Config: $CONFIG (100 epochs, preload enabled)"
 echo "Base output: $BASE_OUTPUT"
-echo "Estimated time: ~1h 4m per run, ~4h 16m total"
+echo "Estimated time: ~2.5-3h per run, ~10-12h total"
 echo "=============================================="
 
 for rep in 2 3 4 5; do
@@ -40,9 +45,9 @@ for rep in 2 3 4 5; do
     -v "${WORKSPACE}:/workspace" \
     -v "${OUTPUT_HOST}:/workspace/output" \
     ucvme:latest \
-    python3 /workspace/ucvme_age.py \
-      --config="$CONFIG" \
-      --output="$OUT"
+    bash -c "pip install --quiet h5py tqdm && python3 /workspace/ucvme_age.py \
+      --config=$CONFIG \
+      --output=$OUT"
   echo "[$(date -Iseconds)] Finished repetition $rep"
 done
 

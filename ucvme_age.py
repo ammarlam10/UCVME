@@ -32,6 +32,10 @@ import utils_pixelwise
 
 from torch.distributions.normal import Normal
 
+# Set to True to save per-epoch prediction CSVs (train_pred_*, val_predmcd0_*, z_val_epch*_prd.csv).
+# Disabled by default to avoid huge files (especially for pixel-wise tasks).
+SAVE_PREDICTION_CSVS = False
+
 
 def load_config(config_path):
     """Load configuration from YAML file."""
@@ -365,6 +369,12 @@ def run(
     if dataset_name == 'so2sat_pop_custom':
         kwargs["normalize_mean"] = y_mean
         kwargs["normalize_std"] = y_std
+    
+    # Check if preload is enabled in config
+    preload_enabled = cfg.get('data', {}).get('preload', False) if config else False
+    if preload_enabled:
+        print("Preloading enabled: images will be loaded into RAM at startup")
+        kwargs["preload"] = True
 
     # Set up datasets and dataloaders
     dataset = {}
@@ -413,6 +423,8 @@ def run(
             f.write("Resuming from epoch {}\n".format(epoch_resume))
         except FileNotFoundError:
             f.write("Starting run from scratch\n")
+            f.write("# train row: epoch,phase,loss,r2_0,r2_1,time_sec,n_samples,mem_allocated,mem_reserved,batch_size,loss_reg_0,cps\n")
+            f.write("# val row:   epoch,phase,loss,r2,mae,rmse,time_sec,n_samples,mem_allocated,mem_reserved,batch_size,0,0\n")
 
         if test_only:
             num_epochs = 0
@@ -468,27 +480,28 @@ def run(
                                                                 cps))
                     f.flush()
                 
-                    with open(os.path.join(output, "train_pred_{}.csv".format(epoch)), "w") as f_trnpred:
-                        for clmn in range(mean_0_ls.shape[1]):
-                            f_trnpred.write("m_0_{},".format(clmn))
-                        for clmn in range(mean_1_ls.shape[1]):
-                            f_trnpred.write("m_1_{},".format(clmn))
-                        for clmn in range(var_0_ls.shape[1]):
-                            f_trnpred.write("v_0_{},".format(clmn))
-                        for clmn in range(var_1_ls.shape[1]):
-                            f_trnpred.write("v_1_{},".format(clmn))
-                        f_trnpred.write("\n".format(clmn))
-                        
-                        for rw in range(mean_0_ls.shape[0]):
+                    if SAVE_PREDICTION_CSVS:
+                        with open(os.path.join(output, "train_pred_{}.csv".format(epoch)), "w") as f_trnpred:
                             for clmn in range(mean_0_ls.shape[1]):
-                                f_trnpred.write("{},".format(mean_0_ls[rw, clmn]))
+                                f_trnpred.write("m_0_{},".format(clmn))
                             for clmn in range(mean_1_ls.shape[1]):
-                                f_trnpred.write("{},".format(mean_1_ls[rw, clmn]))
+                                f_trnpred.write("m_1_{},".format(clmn))
                             for clmn in range(var_0_ls.shape[1]):
-                                f_trnpred.write("{},".format(var_0_ls[rw, clmn]))
+                                f_trnpred.write("v_0_{},".format(clmn))
                             for clmn in range(var_1_ls.shape[1]):
-                                f_trnpred.write("{},".format(var_1_ls[rw, clmn]))
+                                f_trnpred.write("v_1_{},".format(clmn))
                             f_trnpred.write("\n".format(clmn))
+                            
+                            for rw in range(mean_0_ls.shape[0]):
+                                for clmn in range(mean_0_ls.shape[1]):
+                                    f_trnpred.write("{},".format(mean_0_ls[rw, clmn]))
+                                for clmn in range(mean_1_ls.shape[1]):
+                                    f_trnpred.write("{},".format(mean_1_ls[rw, clmn]))
+                                for clmn in range(var_0_ls.shape[1]):
+                                    f_trnpred.write("{},".format(var_0_ls[rw, clmn]))
+                                for clmn in range(var_1_ls.shape[1]):
+                                    f_trnpred.write("{},".format(var_1_ls[rw, clmn]))
+                                f_trnpred.write("\n".format(clmn))
 
                 
                 else:
@@ -506,30 +519,30 @@ def run(
                     
                     print(f"Epoch {epoch} - {phase}: R2={r2_value:.4f}, MAE={mae_value:.2f}, RMSE={rmse_value:.2f}", flush=True)
 
-                    with open(os.path.join(output, "z_{}_epch{}_prd.csv".format(phase, epoch)), "a") as pred_out:
-                        pred_out.write("yhat,y,var_hat, var_e, var_a\n")
-                        for pred_itr in range(y.shape[0]):
-                            pred_out.write("{},{},{},{},{}\n".format(yhat[pred_itr],
-                            y[pred_itr], 
-                            var_hat[pred_itr], 
-                            var_e[pred_itr], 
-                            var_a[pred_itr]))
-                        pred_out.flush()
-                    
-                    with open(os.path.join(output, "val_predmcd0_{}.csv".format(epoch)), "w") as f_trnpred:
-                        for clmn in range(mean_0_ls.shape[1]):
-                            f_trnpred.write("m_0_{},".format(clmn))
-                        for clmn in range(var_0_ls.shape[1]):
-                            f_trnpred.write("v_0_{},".format(clmn))
-                        f_trnpred.write("\n".format(clmn))
+                    if SAVE_PREDICTION_CSVS:
+                        with open(os.path.join(output, "z_{}_epch{}_prd.csv".format(phase, epoch)), "a") as pred_out:
+                            pred_out.write("yhat,y,var_hat, var_e, var_a\n")
+                            for pred_itr in range(y.shape[0]):
+                                pred_out.write("{},{},{},{},{}\n".format(yhat[pred_itr],
+                                y[pred_itr], 
+                                var_hat[pred_itr], 
+                                var_e[pred_itr], 
+                                var_a[pred_itr]))
+                            pred_out.flush()
                         
-                        for rw in range(mean_0_ls.shape[0]):
+                        with open(os.path.join(output, "val_predmcd0_{}.csv".format(epoch)), "w") as f_trnpred:
                             for clmn in range(mean_0_ls.shape[1]):
-                                f_trnpred.write("{},".format(mean_0_ls[rw, clmn]))
+                                f_trnpred.write("m_0_{},".format(clmn))
                             for clmn in range(var_0_ls.shape[1]):
-                                f_trnpred.write("{},".format(var_0_ls[rw, clmn]))
+                                f_trnpred.write("v_0_{},".format(clmn))
                             f_trnpred.write("\n".format(clmn))
-
+                            
+                            for rw in range(mean_0_ls.shape[0]):
+                                for clmn in range(mean_0_ls.shape[1]):
+                                    f_trnpred.write("{},".format(mean_0_ls[rw, clmn]))
+                                for clmn in range(var_0_ls.shape[1]):
+                                    f_trnpred.write("{},".format(var_0_ls[rw, clmn]))
+                                f_trnpred.write("\n".format(clmn))
 
                     f.write("{},{},{},{},{},{},{},{},{},{},{},{},{}".format(epoch,
                                                                 phase,
@@ -604,8 +617,8 @@ def run(
                     batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=(device.type == "cuda"), worker_init_fn=worker_init_fn)
                 total_loss, yhat, y, _, _, _, _, _ = run_epoch_val(model = model, model_1 = model_1, dataloader = dataloader, train = False, optim = None, device = device, block_size=None, y_mean = y_mean, y_std = y_std, samp_fq = samp_fq)
 
-                # Dataset returns normalized y; yhat is denormalized. Convert y to original scale for metrics.
-                y_orig = y * y_std + y_mean
+                # Datasets return raw targets; run_epoch_val returns y=raw (concatenated), yhat=denormalized. Use y as-is for metrics.
+                y_orig = y
                 f.write("{} - {} (one clip) R2:   {:.3f}\n".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"), split, sklearn.metrics.r2_score(y_orig, yhat)))
                 f.write("{} - {} (one clip) MAE:  {:.2f}\n".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"), split, sklearn.metrics.mean_absolute_error(y_orig, yhat)))
                 f.write("{} - {} (one clip) RMSE: {:.2f}\n".format(datetime.datetime.now().strftime("%Y%m%d_%H%M%S"), split, sklearn.metrics.mean_squared_error(y_orig, yhat)**0.5))
@@ -692,16 +705,40 @@ def run_epoch(model,
         with torch.no_grad():
             for samp_ssl_itr in range(samp_ssl):
                 mean1_raw_0, var1_raw_0 = model(X_ulb_in)
-                mean1_0 = mean1_raw_0.view(-1)
-                var1_0 = var1_raw_0.view(-1)
+                
+                # Handle pixel-wise vs image-level outputs
+                if utils_pixelwise.is_pixelwise_output(mean1_raw_0):
+                    # Pixel-wise: squeeze channel dim but keep spatial (B, H, W)
+                    if mean1_raw_0.dim() == 4 and mean1_raw_0.size(1) == 1:
+                        mean1_0 = mean1_raw_0.squeeze(1)
+                        var1_0 = var1_raw_0.squeeze(1)
+                    else:
+                        mean1_0 = mean1_raw_0
+                        var1_0 = var1_raw_0
+                else:
+                    # Image-level: flatten to 1D
+                    mean1_0 = mean1_raw_0.view(-1)
+                    var1_0 = var1_raw_0.view(-1)
 
                 mean1s_0.append(mean1_0** 2)
                 mean2s_0.append(mean1_0)
                 var1s_0.append(var1_0)
 
                 mean1_raw_1, var1_raw_1 = model_1(X_ulb_in)
-                mean1_1 = mean1_raw_1.view(-1)
-                var1_1 = var1_raw_1.view(-1)
+                
+                # Handle pixel-wise vs image-level outputs
+                if utils_pixelwise.is_pixelwise_output(mean1_raw_1):
+                    # Pixel-wise: squeeze channel dim but keep spatial (B, H, W)
+                    if mean1_raw_1.dim() == 4 and mean1_raw_1.size(1) == 1:
+                        mean1_1 = mean1_raw_1.squeeze(1)
+                        var1_1 = var1_raw_1.squeeze(1)
+                    else:
+                        mean1_1 = mean1_raw_1
+                        var1_1 = var1_raw_1
+                else:
+                    # Image-level: flatten to 1D
+                    mean1_1 = mean1_raw_1.view(-1)
+                    var1_1 = var1_raw_1.view(-1)
 
                 mean1s_1.append(mean1_1** 2)
                 mean2s_1.append(mean1_1)
@@ -733,8 +770,28 @@ def run_epoch(model,
         avg_mean01 = (all_output_unlb_0_pslb + all_output_unlb_1_pslb)/2
         avg_var01 = (var1s_0_ + var1s_1_)/2
 
-        loss_mse_cps_0 = ((all_output_unlb_0_pred_0.view(-1) - avg_mean01)**2)
-        loss_mse_cps_1 = ((all_output_unlb_1_pred_0.view(-1) - avg_mean01)**2)
+        # Handle pixel-wise vs image-level for consistency loss
+        if utils_pixelwise.is_pixelwise_output(all_output_unlb_0_pred_0):
+            # Pixel-wise: squeeze channel dim but keep spatial (B, H, W)
+            if all_output_unlb_0_pred_0.dim() == 4 and all_output_unlb_0_pred_0.size(1) == 1:
+                pred_0 = all_output_unlb_0_pred_0.squeeze(1)
+                pred_1 = all_output_unlb_1_pred_0.squeeze(1)
+                var_pred_0 = var_unlb_0_pred_0.squeeze(1)
+                var_pred_1 = var_unlb_1_pred_0.squeeze(1)
+            else:
+                pred_0 = all_output_unlb_0_pred_0
+                pred_1 = all_output_unlb_1_pred_0
+                var_pred_0 = var_unlb_0_pred_0
+                var_pred_1 = var_unlb_1_pred_0
+        else:
+            # Image-level: flatten to 1D
+            pred_0 = all_output_unlb_0_pred_0.view(-1)
+            pred_1 = all_output_unlb_1_pred_0.view(-1)
+            var_pred_0 = var_unlb_0_pred_0.view(-1)
+            var_pred_1 = var_unlb_1_pred_0.view(-1)
+
+        loss_mse_cps_0 = ((pred_0 - avg_mean01)**2)
+        loss_mse_cps_1 = ((pred_1 - avg_mean01)**2)
 
         loss_cmb_cps_0 = 0.5 * (torch.mul(torch.exp(-avg_var01), loss_mse_cps_0) + avg_var01 )
         loss_cmb_cps_1 = 0.5 * (torch.mul(torch.exp(-avg_var01), loss_mse_cps_1) + avg_var01 )
@@ -743,8 +800,8 @@ def run_epoch(model,
         loss_reg_cps1 = loss_cmb_cps_1.mean()
 
         
-        var_loss_ulb_0 = ((var_unlb_0_pred_0.view(-1) - avg_var01)**2).mean()
-        var_loss_ulb_1 = ((var_unlb_1_pred_0.view(-1) - avg_var01)**2).mean()
+        var_loss_ulb_0 = ((var_pred_0 - avg_var01)**2).mean()
+        var_loss_ulb_1 = ((var_pred_1 - avg_var01)**2).mean()
 
 
         loss_reg_cps = (loss_reg_cps0 + loss_reg_cps1) + (var_loss_ulb_0 + var_loss_ulb_1)

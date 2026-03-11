@@ -187,6 +187,8 @@ class BayernForestHeightDataset(torchvision.datasets.VisionDataset):
             rgb = (rgb - mean_reshaped) / std_reshaped
         
         # Data augmentation for training
+        # IMPORTANT: Apply the exact same geometric transform to RGB and NDSM so
+        # pixel correspondence is preserved (wrong height would be learned otherwise).
         if self.split == "TRAIN":
             # Random horizontal flip
             if np.random.rand() > 0.5:

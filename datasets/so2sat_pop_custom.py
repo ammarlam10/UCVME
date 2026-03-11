@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import torchvision
 from typing import Optional, List
+import tqdm
 
 
 class So2SatDatasetCustom(torchvision.datasets.VisionDataset):
@@ -15,6 +16,7 @@ class So2SatDatasetCustom(torchvision.datasets.VisionDataset):
     - Uses RGB bands (2-4) from sen2spring Sentinel-2 images
     - Custom image normalization: clip to [0, 4000], divide by 4000, then min-max normalize
     - Custom label normalization with specified mean and std
+    - Optional preloading: load all images into RAM at init to avoid repeated disk I/O
     
     Dataset structure:
     - Part1/train/city_name/city_name.csv (contains GRD_ID, Class, POP)
@@ -38,7 +40,8 @@ class So2SatDatasetCustom(torchvision.datasets.VisionDataset):
                  image_dir="So2Sat_POP_Part1",  # Part1 contains Sentinel-2 images
                  file_list_name="FileList.csv",
                  normalize_mean=1085.0,  # Label normalization mean
-                 normalize_std=2800.0    # Label normalization std
+                 normalize_std=2800.0,   # Label normalization std
+                 preload=False           # If True, preload all images into RAM at init
                  ):
         if root is None:
             raise ValueError("root value is required")
@@ -59,8 +62,10 @@ class So2SatDatasetCustom(torchvision.datasets.VisionDataset):
         self.file_list_name = file_list_name
         self.normalize_mean = normalize_mean
         self.normalize_std = normalize_std
+        self.preload = preload
         
         self.fnames, self.outcome = [], []
+        self.preloaded_images = None
         
         # Load file list
         file_list_path = os.path.join(self.root, "{}{}.csv".format(self.file_list_name.replace(".csv", ""), self.ssl_postfix))
@@ -124,9 +129,18 @@ class So2SatDatasetCustom(torchvision.datasets.VisionDataset):
             if len(missing) > 10:
                 print(f"\t... and {len(missing) - 10} more")
             raise FileNotFoundError(f"Missing files. First missing: {sorted(missing)[0]}")
+        
+        # Preload all images into memory if requested
+        if self.preload:
+            print(f"Preloading {len(self.fnames)} images into memory...")
+            self.preloaded_images = []
+            for idx in tqdm.tqdm(range(len(self.fnames)), desc=f"Preloading {self.split}"):
+                img = self._load_and_process_image(idx)
+                self.preloaded_images.append(img)
+            print(f"✓ Preloaded {len(self.preloaded_images)} images (~{len(self.preloaded_images) * 3 * 224 * 224 * 4 / (1024**3):.2f} GB)")
     
-    def __getitem__(self, index):
-        # Get image path
+    def _load_and_process_image(self, index):
+        """Load and process a single image from disk (without augmentation)."""
         image_path = os.path.join(self.root, self.fnames[index])
         
         # Load image - handle Sentinel-2 multi-spectral TIFF files
@@ -197,17 +211,22 @@ class So2SatDatasetCustom(torchvision.datasets.VisionDataset):
         
         # Ensure 3 channels for RGB models (if single channel, repeat)
         if photo.shape[0] == 1:
-            photo = np.repeat(photo, 3, axis=0).copy()  # Make contiguous after repeat
+            photo = np.repeat(photo, 3, axis=0).copy()
         elif photo.shape[0] > 3:
-            # Multi-spectral: take first 3 channels (make contiguous copy)
             photo = photo[:3, :, :].copy()
         
-        # Note: Image normalization (clipping and min-max) is already applied above
-        # No additional mean/std normalization needed
+        return photo
+    
+    def __getitem__(self, index):
+        # Load image (either from preloaded memory or from disk)
+        if self.preload and self.preloaded_images is not None:
+            photo = self.preloaded_images[index].copy()
+        else:
+            photo = self._load_and_process_image(index)
         
         # Data augmentation: random horizontal flip
         if np.random.randint(0, 2) == 0:
-            photo = photo[:, :, ::-1].copy()  # Make contiguous copy to avoid storage issues
+            photo = photo[:, :, ::-1].copy()
         
         # Gather targets
         target = []
@@ -224,27 +243,16 @@ class So2SatDatasetCustom(torchvision.datasets.VisionDataset):
         
         # Apply padding augmentation if specified
         if self.pad is not None:
-            photo1 = photo.copy()
             c, h, w = photo.shape
-            
             temp1 = np.zeros((c, h + 2 * self.pad, w + 2 * self.pad), dtype=photo.dtype)
-            temp1[:, self.pad:-self.pad, self.pad:-self.pad] = photo1
-            
+            temp1[:, self.pad:-self.pad, self.pad:-self.pad] = photo
             i1, j1 = np.random.randint(0, 2 * self.pad, 2)
-            photo1 = temp1[:, i1:(i1 + h), j1:(j1 + w)].copy()  # Make contiguous copy
-        else:
-            photo1 = photo.copy()
+            photo = temp1[:, i1:(i1 + h), j1:(j1 + w)].copy()
         
-        # Create a completely fresh array with no memory sharing
-        # Use np.empty and explicit copy to ensure absolute independence
-        photo1_final = np.empty_like(photo1, dtype=np.float32, order='C')
-        np.copyto(photo1_final, photo1)
+        # Ensure contiguous and independent array
+        photo_final = np.ascontiguousarray(photo)
         
-        # Final verification: ensure it's truly contiguous and independent
-        assert photo1_final.flags['C_CONTIGUOUS'], "Array must be C-contiguous"
-        assert photo1_final.flags['OWNDATA'], "Array must own its data"
-        
-        return photo1_final, target
+        return photo_final, target
     
     def __len__(self):
         return len(self.fnames)

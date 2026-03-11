@@ -30,14 +30,15 @@ data:
   label_percentage: 0.05    # 5% labeled (from filtered training samples = 3,047 samples)
   unlabel_percentage: 0.95  # 95% unlabeled (from filtered training samples = 57,905 samples)
   pad_param: 5
+  preload: true  # Preload all images into RAM at startup (recommended for 100 epochs)
 
 training:
-  num_epochs: 30
+  num_epochs: 100
   lr: 0.0001
   weight_decay: 1e-3
   lr_step_period: 10
-  batch_size: 64  # Reduced to 64 to avoid CUDA OOM
-  num_workers: 2  # Reduced to 2 to free up GPU memory
+  batch_size: 80  # Reduced to 64 to avoid CUDA OOM
+  num_workers: 4  # Reduced to 2 to free up GPU memory
   seed: 0
 
 ssl:
