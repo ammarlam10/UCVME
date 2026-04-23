@@ -36,8 +36,8 @@ ssl:
 
 target:
   # Target normalization (height in meters)
-  y_mean: 12.26  # From dataset statistics
-  y_std: 11.05   # From dataset statistics
+  y_mean: 12.13  # From dataset statistics (ndsm_stats.csv)
+  y_std: 10.96   # From dataset statistics (ndsm_stats.csv)
 
 misc:
   output: output/bayern_forest_height_unet_5percent

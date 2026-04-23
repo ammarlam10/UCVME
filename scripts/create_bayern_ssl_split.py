@@ -74,7 +74,7 @@ def create_ssl_split(data_dir, label_percentage, seed=0):
 
 
 def main():
-    data_dir = "/work/ammar/sslrp/data/Bayern_forest_height_reduced"
+    data_dir = "/home/ammar/data/Bayern_forest_height_reduced"
     
     if not os.path.exists(data_dir):
         print(f"Error: Data directory not found: {data_dir}")

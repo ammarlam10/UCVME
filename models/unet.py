@@ -125,36 +125,27 @@ class UNet_unc(nn.Module):
         nn.init.constant_(self.outc_v.bias, 0)
     
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
-        # Encoder with skip connections
+        # Encoder with skip connections (no dropout — preserves spatial detail)
         x1 = self.inc(x)
-        x1 = nn.functional.dropout(x1, p=self.drop_rate, training=True)
-        
         x2 = self.down1(x1)
-        x2 = nn.functional.dropout(x2, p=self.drop_rate, training=True)
-        
         x3 = self.down2(x2)
-        x3 = nn.functional.dropout(x3, p=self.drop_rate, training=True)
-        
         x4 = self.down3(x3)
+        
+        # Bottleneck dropout only: applied at the most compressed representation
+        # (B, 512, 32, 32) before any decoding, so subsequent spatial convolutions
+        # cannot average out the stochastic perturbation. This is the only location
+        # where MC Dropout produces meaningful epistemic variance in a fully
+        # convolutional network.
         x4 = nn.functional.dropout(x4, p=self.drop_rate, training=True)
         
-        # Decoder with skip connections
+        # Decoder with skip connections (no dropout — clean skip paths)
         x = self.up1(x4, x3)
-        x = nn.functional.dropout(x, p=self.drop_rate, training=True)
-        
         x = self.up2(x, x2)
-        x = nn.functional.dropout(x, p=self.drop_rate, training=True)
-        
         x = self.up3(x, x1)
-        x = nn.functional.dropout(x, p=self.drop_rate, training=True)
-        
-        # Separate dropout for mean and variance heads
-        x_feat_m = nn.functional.dropout(x, p=self.drop_rate, training=True)
-        x_feat_v = nn.functional.dropout(x, p=self.drop_rate, training=True)
         
         # Output mean and log-variance
-        x_m = self.outc_m(x_feat_m)
-        x_v = self.outc_v(x_feat_v)
+        x_m = self.outc_m(x)
+        x_v = self.outc_v(x)
         
         return x_m, x_v
 

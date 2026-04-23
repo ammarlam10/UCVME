@@ -149,21 +149,6 @@ class BayernForestHeightDataset(torchvision.datasets.VisionDataset):
         else:
             raise ValueError(f"Unknown split: {split}. Use 'train', 'val', or 'test'")
         
-        # Calculate normalization statistics from training data
-        if self.split == "TRAIN":
-            train_rgb = self.rgb_data[self.indices]
-            train_ndsm = self.ndsm_data[self.indices]
-            
-            # Image statistics
-            self.rgb_mean = train_rgb.mean()
-            self.rgb_std = train_rgb.std()
-            
-            # Target statistics (for normalization)
-            self.ndsm_mean = train_ndsm.mean()
-            self.ndsm_std = train_ndsm.std()
-            
-            print(f"RGB stats: mean={self.rgb_mean:.2f}, std={self.rgb_std:.2f}")
-            print(f"NDSM stats: mean={self.ndsm_mean:.2f}, std={self.ndsm_std:.2f}")
     
     def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
         # Get actual index in full dataset
@@ -203,17 +188,17 @@ class BayernForestHeightDataset(torchvision.datasets.VisionDataset):
             # Random padding crop (if specified)
             if self.pad is not None and self.pad > 0:
                 c, h, w = rgb.shape
+                p = self.pad
                 
-                # Add padding
-                rgb_padded = np.zeros((c, h + 2 * self.pad, w + 2 * self.pad), dtype=rgb.dtype)
-                rgb_padded[:, self.pad:-self.pad, self.pad:-self.pad] = rgb
+                # Reflect-pad both RGB and NDSM so border crops see realistic
+                # aerial image content rather than black zero-filled borders.
+                # np.pad mode='reflect' mirrors pixels at the edge inward.
+                rgb_padded = np.pad(rgb, ((0, 0), (p, p), (p, p)), mode='reflect')
+                ndsm_padded = np.pad(ndsm, ((0, 0), (p, p), (p, p)), mode='reflect')
                 
-                ndsm_padded = np.zeros((1, h + 2 * self.pad, w + 2 * self.pad), dtype=ndsm.dtype)
-                ndsm_padded[:, self.pad:-self.pad, self.pad:-self.pad] = ndsm
-                
-                # Random crop
-                i = np.random.randint(0, 2 * self.pad + 1)
-                j = np.random.randint(0, 2 * self.pad + 1)
+                # Random crop back to original size
+                i = np.random.randint(0, 2 * p + 1)
+                j = np.random.randint(0, 2 * p + 1)
                 
                 rgb = rgb_padded[:, i:i+h, j:j+w].copy()
                 ndsm = ndsm_padded[:, i:i+h, j:j+w].copy()

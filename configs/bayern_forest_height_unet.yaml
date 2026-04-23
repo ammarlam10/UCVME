@@ -37,8 +37,8 @@ ssl:
 target:
   # Target normalization (height in meters)
   # These will be calculated from training data
-  y_mean: 15.0  # Approximate mean height
-  y_std: 10.0   # Approximate std height
+  y_mean: 12.13  # From dataset statistics (ndsm_stats.csv)
+  y_std: 10.96   # From dataset statistics (ndsm_stats.csv)
 
 misc:
   output: output/bayern_forest_height_unet
